@@ -29,6 +29,7 @@ export default function LoginPage({ apiBaseUrl, onLogin }: Props) {
       }
       setToken(data.token)
       if (data.sessionId) localStorage.setItem('session_id', data.sessionId)
+      if (data.displayName) localStorage.setItem('display_name', data.displayName)
       onLogin()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al iniciar sesion')

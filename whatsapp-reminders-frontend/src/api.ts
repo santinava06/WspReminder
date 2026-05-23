@@ -27,6 +27,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   if ((response.status === 401 || response.status === 403) && token) {
     clearToken()
     localStorage.removeItem('session_id')
+    localStorage.removeItem('display_name')
     window.location.reload()
   }
   return response

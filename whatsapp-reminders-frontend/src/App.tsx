@@ -295,6 +295,7 @@ function App() {
   const [mediaAttachment, setMediaAttachment] = useState<MediaAttachment | null>(null)
   const [authenticated, setAuthenticated] = useState(() => !!getToken())
   const sessionId = useMemo(() => getStoredSessionId(), [authenticated])
+  const displayName = useMemo(() => localStorage.getItem('display_name') || sessionId, [sessionId])
   const sessions = useMemo<SessionSummary[]>(() => [{ id: sessionId, status: '', ready: false, qrAvailable: false, createdAt: '', updatedAt: '' }], [sessionId])
   const selectedSessionId = sessionId
 
@@ -1121,7 +1122,7 @@ function App() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-xs font-semibold text-slate-500">Sesión</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-950">{selectedSession?.id ?? 'Cargando...'}</p>
+                    <p className="mt-1 text-sm font-semibold text-slate-950">{displayName}</p>
                     <p className="mt-1 text-xs text-slate-500">{selectedSession?.message ?? 'Esperando conexion.'}</p>
                   </div>
                   <span className={`status-pill ${selectedSession?.ready ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>

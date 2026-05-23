@@ -10,7 +10,7 @@ const app = express()
 app.use(cors())
 app.use(express.json({ limit: '10mb' }))
 
-const SESSION_NAMES = ['admin1', 'admin2', 'admin3', 'admin4', 'admin5']
+const SESSION_NAMES = ['admin', 'comercial-1', 'comercial-2', 'academico-1', 'in']
 for (const name of SESSION_NAMES) {
   if (!sessionManager.hasSession(name)) {
     sessionManager.createSession(name)
@@ -26,7 +26,7 @@ app.post('/api/login', (req, res) => {
   if (!result) {
     return res.status(401).json({ ok: false, error: 'Credenciales invalidas' })
   }
-  res.json({ ok: true, token: result.token, sessionId: result.sessionId })
+  res.json({ ok: true, token: result.token, sessionId: result.sessionId, displayName: result.displayName })
 })
 
 function authMiddleware(req, res, next) {
@@ -41,9 +41,10 @@ function authMiddleware(req, res, next) {
     console.log(`[auth] 401: token invalido. path: ${req.path}, token prefix: ${token.slice(0, 12)}...`)
     return res.status(401).json({ ok: false, error: 'Token invalido' })
   }
-  console.log(`[auth] OK: ${info.username} -> ${info.sessionId} for ${req.method} ${req.path}`)
+  console.log(`[auth] OK: ${info.displayName} (${info.username}) -> ${info.sessionId} for ${req.method} ${req.path}`)
   req.userSessionId = info.sessionId
   req.username = info.username
+  req.displayName = info.displayName
   next()
 }
 
@@ -53,11 +54,13 @@ app.get('/debug', (req, res) => {
   const s = sessionManager.getSession(req.userSessionId)
   res.json({
     ok: true,
-    user: req.username,
+    displayName: req.displayName,
+    username: req.username,
     sessionId: req.userSessionId,
     clientExists: !!s?.client,
     clientReady: s?.isClientReady,
     status: s?.sessionStatus,
+    qrAvailable: !!s?.lastQrDataUrl,
     userInfo: s?.client?.user ? { id: s.client.user.id, name: s.client.user.name } : null,
   })
 })
