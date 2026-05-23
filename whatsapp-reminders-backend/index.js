@@ -32,13 +32,16 @@ app.post('/api/login', (req, res) => {
 function authMiddleware(req, res, next) {
   const header = req.headers.authorization
   if (!header || !header.startsWith('Bearer ')) {
+    console.log(`[auth] 401: no Bearer token. path: ${req.path}, method: ${req.method}`)
     return res.status(401).json({ ok: false, error: 'Token requerido' })
   }
   const token = header.slice(7)
   const info = auth.authenticate(token)
   if (!info) {
+    console.log(`[auth] 401: token invalido. path: ${req.path}, token prefix: ${token.slice(0, 12)}...`)
     return res.status(401).json({ ok: false, error: 'Token invalido' })
   }
+  console.log(`[auth] OK: ${info.username} -> ${info.sessionId} for ${req.method} ${req.path}`)
   req.userSessionId = info.sessionId
   req.username = info.username
   next()

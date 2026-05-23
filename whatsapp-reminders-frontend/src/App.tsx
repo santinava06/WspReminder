@@ -293,9 +293,10 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [mediaAttachment, setMediaAttachment] = useState<MediaAttachment | null>(null)
-  const [sessions] = useState<SessionSummary[]>(() => [{ id: getStoredSessionId(), status: '', ready: false, qrAvailable: false, createdAt: '', updatedAt: '' }])
-  const selectedSessionId = sessions[0]?.id ?? 'default'
   const [authenticated, setAuthenticated] = useState(() => !!getToken())
+  const sessionId = useMemo(() => getStoredSessionId(), [authenticated])
+  const sessions = useMemo<SessionSummary[]>(() => [{ id: sessionId, status: '', ready: false, qrAvailable: false, createdAt: '', updatedAt: '' }], [sessionId])
+  const selectedSessionId = sessionId
 
   const handleFileSelect = useCallback((file: File | null) => {
     setSelectedFile(file)
