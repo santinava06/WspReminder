@@ -11,27 +11,65 @@ app.use(express.json({ limit: '10mb' }))
 
 const defaultSession = sessionManager.createSession(sessionManager.DEFAULT_SESSION_ID)
 
+const NUM_AUTO_SESSIONS = Number.parseInt(process.env.NUM_AUTO_SESSIONS, 10) || 5
+for (let i = 2; i <= NUM_AUTO_SESSIONS; i++) {
+  const name = `sesion-${i}`
+  if (!sessionManager.hasSession(name)) {
+    sessionManager.createSession(name)
+  }
+}
+
 app.get('/', (req, res) => {
   res.json({ ok: true, message: 'Backend de recordatorios funcionando' })
 })
 
-// compatibilidad con frontend que usa /sessions/default/...
-app.use('/sessions/:sessionId', (req, res, next) => {
-  req.session = defaultSession
-  next()
-}, createSessionRouter())
-
 app.get('/sessions', (req, res) => {
-  res.json({ ok: true, sessions: [sessionManager.sessionSummary(defaultSession)] })
+  res.json({ ok: true, sessions: sessionManager.listSessions() })
 })
 
 app.post('/sessions', (req, res) => {
-  res.status(201).json({ ok: true, message: 'Usando sesion unica', session: sessionManager.sessionSummary(defaultSession) })
+  const requestedSessionId = req.body.sessionId || req.body.id
+  if (!requestedSessionId) {
+    return res.status(400).json({ ok: false, error: 'Falta sessionId' })
+  }
+
+  const normalizedSessionId = sessionManager.normalizeSessionId(requestedSessionId)
+  if (!normalizedSessionId) {
+    return res.status(400).json({ ok: false, error: 'sessionId invalido. Solo letras, numeros, guiones y guiones bajos' })
+  }
+
+  if (sessionManager.hasSession(normalizedSessionId)) {
+    return res.status(409).json({ ok: false, error: `Sesion ${normalizedSessionId} ya existe` })
+  }
+
+  const session = sessionManager.createSession(normalizedSessionId)
+  return res.status(201).json({ ok: true, message: 'Sesion creada', session: sessionManager.sessionSummary(session) })
+})
+
+app.get('/sessions/:sessionId', (req, res) => {
+  const session = sessionManager.getSession(req.params.sessionId)
+  if (!session) {
+    return res.status(404).json({ ok: false, error: 'Sesion no encontrada' })
+  }
+  res.json({ ok: true, session: sessionManager.sessionSummary(session) })
 })
 
 app.delete('/sessions/:sessionId', async (req, res) => {
-  res.json({ ok: true, message: 'Sesion unica no se puede destruir' })
+  const destroyed = await sessionManager.destroySession(req.params.sessionId)
+  if (!destroyed) {
+    return res.status(404).json({ ok: false, error: 'Sesion no encontrada' })
+  }
+  res.json({ ok: true, message: 'Sesion destruida' })
 })
+
+app.use('/sessions/:sessionId', (req, res, next) => {
+  const session = sessionManager.getSession(req.params.sessionId)
+  if (!session) {
+    return res.status(404).json({ ok: false, error: 'Sesion no encontrada' })
+  }
+  req.session = session
+  next()
+}, createSessionRouter())
 
 app.use('/', (req, res, next) => {
   req.session = defaultSession

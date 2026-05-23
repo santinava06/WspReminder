@@ -185,6 +185,12 @@ async function destroySession(sessionId) {
   return true
 }
 
+function normalizeSessionId(id) {
+  if (!id || typeof id !== 'string') return null
+  const normalized = id.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '')
+  return normalized.length > 0 ? normalized : null
+}
+
 module.exports = {
   DEFAULT_SESSION_ID,
   createSession,
@@ -193,4 +199,5 @@ module.exports = {
   listSessions: () => [...sessions.values()].map(sessionSummary),
   sessionSummary,
   destroySession,
+  normalizeSessionId,
 }
