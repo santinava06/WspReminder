@@ -1,0 +1,27 @@
+services:
+  - type: web_service
+    name: whatsapp-reminders-backend
+    env: node
+    branch: main
+    root: whatsapp-reminders-backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 3177
+      - key: NODE_ENV
+        value: production
+      - key: WHATSAPP_REMINDERS_DATA_DIR
+        value: /tmp/whatsapp-reminders-data
+
+  - type: static_site
+    name: whatsapp-reminders-frontend
+    branch: main
+    root: whatsapp-reminders-frontend
+    buildCommand: npm install && npm run build
+    publishPath: dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://whatsapp-reminders-backend.onrender.com

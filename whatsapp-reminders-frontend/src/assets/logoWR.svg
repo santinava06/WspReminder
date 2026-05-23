@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="WhatsApp Reminders">
+  <defs>
+    <linearGradient id="bubble" x1="66" y1="203" x2="188" y2="63" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0ba35a"/>
+      <stop offset="0.55" stop-color="#21d665"/>
+      <stop offset="1" stop-color="#8cff5d"/>
+    </linearGradient>
+    <linearGradient id="arrow" x1="66" y1="28" x2="180" y2="133" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#e9fff1"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="145%">
+      <feDropShadow dx="0" dy="7" stdDeviation="7" flood-color="#00391f" flood-opacity="0.38"/>
+    </filter>
+  </defs>
+
+  <rect width="256" height="256" rx="56" fill="#10291f"/>
+
+  <g filter="url(#shadow)">
+    <path d="M74 80 39 94l28 34 8-24c16 8 29 20 38 36l25-16c-13-24-31-41-54-52l7-23Z" fill="#006a37"/>
+    <path d="M74 80 39 94l28 34 8-24c16 8 29 20 38 36l25-16c-13-24-31-41-54-52l7-23Z" fill="url(#arrow)" stroke="#0d8744" stroke-width="9" stroke-linejoin="round"/>
+
+    <path d="M109 31 98 94l25-7c9 17 16 34 20 53l30-6c-5-24-14-46-27-67l24-8Z" fill="#006a37"/>
+    <path d="M109 31 98 94l25-7c9 17 16 34 20 53l30-6c-5-24-14-46-27-67l24-8Z" fill="url(#arrow)" stroke="#0d8744" stroke-width="9" stroke-linejoin="round"/>
+
+    <path d="M166 47 153 71c-21 14-34 36-35 61l31 1c1-15 9-29 22-38l11 22 28-45Z" fill="#006a37"/>
+    <path d="M166 47 153 71c-21 14-34 36-35 61l31 1c1-15 9-29 22-38l11 22 28-45Z" fill="url(#arrow)" stroke="#0d8744" stroke-width="9" stroke-linejoin="round"/>
+  </g>
+
+  <g filter="url(#shadow)">
+    <path d="M124 68c-55 0-100 41-100 92 0 18 6 35 16 49l-15 44 48-18c15 10 33 16 51 16 55 0 100-41 100-91s-45-92-100-92Z" fill="#05743f"/>
+    <path d="M124 68c-55 0-100 41-100 92 0 18 6 35 16 49l-15 44 48-18c15 10 33 16 51 16 55 0 100-41 100-91s-45-92-100-92Z" fill="url(#bubble)" stroke="#ffffff" stroke-width="18" stroke-linejoin="round"/>
+    <path d="M124 88c-43 0-79 32-79 72 0 15 5 29 14 41l-8 23 25-9c13 9 29 14 48 14 44 0 79-31 79-69 0-40-35-72-79-72Z" fill="none" stroke="#08783f" stroke-opacity="0.32" stroke-width="5"/>
+  </g>
+
+  <path d="M91 113c7-8 17-8 23 1l10 18c3 6 2 11-4 16l-8 7c10 18 25 31 45 39l7-9c4-6 10-8 16-5l20 8c9 4 12 13 7 21-8 13-23 20-39 16-37-9-70-40-81-77-4-14-2-26 4-35Z" fill="#00542d" opacity="0.25"/>
+  <path d="M88 108c7-8 17-8 23 1l10 18c3 6 2 11-4 16l-8 7c10 18 25 31 45 39l7-9c4-6 10-8 16-5l20 8c9 4 12 13 7 21-8 13-23 20-39 16-37-9-70-40-81-77-4-14-2-26 4-35Z" fill="#ffffff"/>
+</svg>

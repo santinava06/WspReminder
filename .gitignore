@@ -1,0 +1,23 @@
+# Dependencias
+node_modules/
+whatsapp-reminders-backend/node_modules/
+whatsapp-reminders-frontend/node_modules/
+
+# Archivos de compilación
+whatsapp-reminders-frontend/dist/
+
+# Entornos y configuraciones locales
+*.env
+.env.local
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Archivos de Tauri / builds
+whatsapp-reminders-frontend/src-tauri/binaries/
+whatsapp-reminders-frontend/src-tauri/target/
+
+# Sistema
+Thumbs.db
