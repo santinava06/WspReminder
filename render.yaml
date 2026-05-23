@@ -1,5 +1,5 @@
 services:
-  - type: web_service
+  - type: web
     name: whatsapp-reminders-backend
     env: node
     branch: main
