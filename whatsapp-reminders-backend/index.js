@@ -15,6 +15,24 @@ app.get('/', (req, res) => {
   res.json({ ok: true, message: 'Backend de recordatorios funcionando' })
 })
 
+// compatibilidad con frontend que usa /sessions/default/...
+app.use('/sessions/:sessionId', (req, res, next) => {
+  req.session = defaultSession
+  next()
+}, createSessionRouter())
+
+app.get('/sessions', (req, res) => {
+  res.json({ ok: true, sessions: [sessionManager.sessionSummary(defaultSession)] })
+})
+
+app.post('/sessions', (req, res) => {
+  res.status(201).json({ ok: true, message: 'Usando sesion unica', session: sessionManager.sessionSummary(defaultSession) })
+})
+
+app.delete('/sessions/:sessionId', async (req, res) => {
+  res.json({ ok: true, message: 'Sesion unica no se puede destruir' })
+})
+
 app.use('/', (req, res, next) => {
   req.session = defaultSession
   next()
