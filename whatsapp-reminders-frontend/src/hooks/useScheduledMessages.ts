@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Group } from '../components/GroupList'
+import { apiFetch } from '../api'
 
 export type ScheduledStatus = 'pending' | 'waiting_connection' | 'sending' | 'sent' | 'failed' | 'cancelled'
 
@@ -39,7 +40,7 @@ export default function useScheduledMessages(apiBaseUrl: string, sessionId: stri
 
   const fetchScheduled = useCallback(async () => {
     try {
-      const response = await fetch(scheduledBaseUrl)
+      const response = await apiFetch(scheduledBaseUrl)
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const data = (await response.json()) as ScheduledResponse
       if (!data.ok) throw new Error(data.error || 'Error al obtener programados')
@@ -53,7 +54,7 @@ export default function useScheduledMessages(apiBaseUrl: string, sessionId: stri
 
   const createScheduled = useCallback(
     async (groups: Group[], message: string, scheduledAt: string, media?: MediaAttachment) => {
-      const response = await fetch(scheduledBaseUrl, {
+      const response = await apiFetch(scheduledBaseUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -73,7 +74,7 @@ export default function useScheduledMessages(apiBaseUrl: string, sessionId: stri
 
   const cancelScheduled = useCallback(
     async (id: string) => {
-      const response = await fetch(`${scheduledBaseUrl}/${id}`, { method: 'DELETE' })
+      const response = await apiFetch(`${scheduledBaseUrl}/${id}`, { method: 'DELETE' })
       const data = await response.json()
       if (!response.ok || !data.ok) throw new Error(data.error || 'Error al cancelar')
       await fetchScheduled()

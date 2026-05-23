@@ -15,6 +15,8 @@ import type { SendHistoryItem, SendProgressResult } from './hooks/useSendHistory
 import type { MediaAttachment } from './hooks/useScheduledMessages'
 import useScheduledMessages from './hooks/useScheduledMessages'
 import useSettings from './hooks/useSettings'
+import { apiFetch, getToken } from './api'
+import LoginPage from './components/LoginPage'
 
 type StatusResponse = {
   ready: boolean
@@ -297,6 +299,7 @@ function App() {
   const [sessionError, setSessionError] = useState('')
   const [selectedSessionId, setSelectedSessionId] = useState<string>(() => localStorage.getItem(SESSION_STORAGE_KEY) ?? DEFAULT_SESSION_ID)
   const [newSessionId, setNewSessionId] = useState('')
+  const [authenticated, setAuthenticated] = useState(() => !!getToken())
 
   const handleFileSelect = useCallback((file: File | null) => {
     setSelectedFile(file)
@@ -445,7 +448,7 @@ function App() {
     const url = `${apiBaseUrl}/sessions/${selectedSessionId}/status`
 
     try {
-      const response = await fetch(url)
+      const response = await apiFetch(url)
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`)
@@ -481,7 +484,7 @@ function App() {
     performance.mark('groups-load-start')
 
     try {
-      const response = await fetch(nextUrl)
+      const response = await apiFetch(nextUrl)
       const data = (await response.json()) as GroupsResponse
 
       if (response.status === 503 && data.ready === false) {
@@ -723,7 +726,7 @@ function App() {
     if (media) {
       body.media = media
     }
-    const response = await fetch(`${sessionBaseUrl}/send-group-reminder`, {
+    const response = await apiFetch(`${sessionBaseUrl}/send-group-reminder`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -920,7 +923,7 @@ function App() {
     setDisconnectState('loading')
 
     try {
-      const response = await fetch(`${sessionBaseUrl}/disconnect`, {
+      const response = await apiFetch(`${sessionBaseUrl}/disconnect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       })
@@ -944,7 +947,7 @@ function App() {
     setSessionError('')
 
     try {
-      const response = await fetch(`${apiBaseUrl}/sessions`)
+      const response = await apiFetch(`${apiBaseUrl}/sessions`)
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       const data = await response.json() as { ok: boolean; sessions?: SessionSummary[]; error?: string }
       if (!data.ok) throw new Error(data.error || 'No se pudo cargar sesiones')
@@ -992,7 +995,7 @@ function App() {
     setSessionState('loading')
 
     try {
-      const response = await fetch(`${apiBaseUrl}/sessions`, {
+      const response = await apiFetch(`${apiBaseUrl}/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionId }),
@@ -1019,7 +1022,7 @@ function App() {
     setSessionState('loading')
 
     try {
-      const response = await fetch(`${apiBaseUrl}/sessions/${selectedSessionId}`, { method: 'DELETE' })
+      const response = await apiFetch(`${apiBaseUrl}/sessions/${selectedSessionId}`, { method: 'DELETE' })
       const data = await response.json() as { ok: boolean; error?: string }
 
       if (!response.ok || !data.ok) {
@@ -1091,6 +1094,10 @@ function App() {
     window.addEventListener('keydown', openCommandPalette)
     return () => window.removeEventListener('keydown', openCommandPalette)
   }, [])
+
+  if (!authenticated) {
+    return <LoginPage apiBaseUrl={apiBaseUrl} onLogin={() => setAuthenticated(true)} />
+  }
 
   return (
     <div

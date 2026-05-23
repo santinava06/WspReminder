@@ -2,6 +2,7 @@ const express = require('express')
 const cors = require('cors')
 const sessionManager = require('./sessionManager')
 const { createSessionRouter } = require('./app')
+const auth = require('./auth')
 
 require('dotenv').config()
 
@@ -18,6 +19,32 @@ for (let i = 2; i <= NUM_AUTO_SESSIONS; i++) {
     sessionManager.createSession(name)
   }
 }
+
+app.post('/api/login', (req, res) => {
+  const { username, password } = req.body
+  if (!username || !password) {
+    return res.status(400).json({ ok: false, error: 'Faltan username o password' })
+  }
+  const token = auth.login(username, password)
+  if (!token) {
+    return res.status(401).json({ ok: false, error: 'Credenciales invalidas' })
+  }
+  res.json({ ok: true, token })
+})
+
+function authMiddleware(req, res, next) {
+  const header = req.headers.authorization
+  if (!header || !header.startsWith('Bearer ')) {
+    return res.status(401).json({ ok: false, error: 'Token requerido' })
+  }
+  const token = header.slice(7)
+  if (!auth.authenticate(token)) {
+    return res.status(401).json({ ok: false, error: 'Token invalido' })
+  }
+  next()
+}
+
+app.use(authMiddleware)
 
 app.get('/', (req, res) => {
   res.json({ ok: true, message: 'Backend de recordatorios funcionando' })
