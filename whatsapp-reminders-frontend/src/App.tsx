@@ -442,8 +442,10 @@ function App() {
     setStatusState('loading')
     setStatusError('')
 
+    const url = `${apiBaseUrl}/sessions/${selectedSessionId}/status`
+
     try {
-      const response = await fetch(`${sessionBaseUrl}/status`)
+      const response = await fetch(url)
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`)
@@ -459,13 +461,14 @@ function App() {
       setStatusError(error instanceof Error ? error.message : 'No se pudo consultar el estado')
       return null
     }
-  }, [apiBaseUrl])
+  }, [apiBaseUrl, selectedSessionId])
 
   const loadGroups = useCallback(async ({ force = false } = {}) => {
     const hasGroups = groupsCountRef.current > 0
+    const base = `${apiBaseUrl}/sessions/${selectedSessionId}`
     const nextUrl = force
-      ? `${sessionBaseUrl}/groups?refresh=1`
-      : `${sessionBaseUrl}/groups`
+      ? `${base}/groups?refresh=1`
+      : `${base}/groups`
 
     if (force && hasGroups) {
       setGroupsRefreshing(true)
@@ -521,7 +524,7 @@ function App() {
     } finally {
       setGroupsRefreshing(false)
     }
-  }, [apiBaseUrl, setGroups])
+  }, [apiBaseUrl, selectedSessionId, setGroups])
 
   const refreshGroups = useCallback(() => {
     loadGroups({ force: true })
