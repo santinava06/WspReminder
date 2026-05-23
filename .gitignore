@@ -19,5 +19,20 @@ pnpm-debug.log*
 whatsapp-reminders-frontend/src-tauri/binaries/
 whatsapp-reminders-frontend/src-tauri/target/
 
+# WhatsApp Web session (no subir a git)
+whatsapp-reminders-backend/.wwebjs_auth/
+whatsapp-reminders-backend/.wwebjs_cache/
+
+# Datos locales generados
+whatsapp-reminders-backend/.data/
+whatsapp-reminders-frontend/src-tauri/.data/
+
+# Binarios / builds locales
+*.exe
+
+# Logs del servidor
+whatsapp-reminders-backend/server.err.log
+whatsapp-reminders-backend/server.out.log
+
 # Sistema
 Thumbs.db
