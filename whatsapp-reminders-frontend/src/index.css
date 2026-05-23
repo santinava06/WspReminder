@@ -189,9 +189,9 @@
   .ui-field {
     min-height: 2.75rem;
     width: 100%;
-    border: 1px solid rgba(var(--border-rgb), 0.95);
+    border: 2px solid rgba(var(--border-rgb), 0.85);
     border-radius: 0.5rem;
-    background: rgba(var(--surface-rgb), 0.82);
+    background: rgba(var(--surface-rgb), 0.92);
     color: rgb(var(--text-rgb));
     outline: none;
     transition:
@@ -205,7 +205,7 @@
   }
 
   .ui-field:focus {
-    border-color: rgba(var(--accent-rgb), 0.52);
+    border-color: rgb(var(--text-rgb));
     background: rgb(var(--surface-rgb));
   }
 

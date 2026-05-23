@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Group } from '../components/GroupList'
-import { apiFetch } from '../api'
+import { apiFetch, getToken } from '../api'
 
 export type ScheduledStatus = 'pending' | 'waiting_connection' | 'sending' | 'sent' | 'failed' | 'cancelled'
 
@@ -39,6 +39,7 @@ export default function useScheduledMessages(apiBaseUrl: string, sessionId: stri
   const scheduledBaseUrl = `${apiBaseUrl}/sessions/${sessionId}/scheduled`
 
   const fetchScheduled = useCallback(async () => {
+    if (!getToken()) return
     try {
       const response = await apiFetch(scheduledBaseUrl)
       if (!response.ok) throw new Error(`HTTP ${response.status}`)

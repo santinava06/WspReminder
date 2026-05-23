@@ -85,8 +85,7 @@ type SessionSummary = {
 const SAVED_GROUP_LISTS_STORAGE_KEY = 'whatsapp-reminders-saved-group-lists'
 const FAVORITE_GROUPS_STORAGE_KEY = 'whatsapp-reminders-favorite-groups'
 const RECENT_GROUPS_STORAGE_KEY = 'whatsapp-reminders-recent-groups'
-const SESSION_STORAGE_KEY = 'whatsapp-reminders-current-session-id'
-const DEFAULT_SESSION_ID = 'default'
+
 const DISCONNECT_RELOAD_KEY = 'whatsapp-reminders-disconnect-reloaded'
 
 function normalizeText(value = '') {
@@ -294,11 +293,8 @@ function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [mediaAttachment, setMediaAttachment] = useState<MediaAttachment | null>(null)
-  const [sessions, setSessions] = useState<SessionSummary[]>([])
-  const [sessionState, setSessionState] = useState<LoadState>('idle')
-  const [sessionError, setSessionError] = useState('')
-  const [selectedSessionId, setSelectedSessionId] = useState<string>(() => getStoredSessionId())
-  const [newSessionId, setNewSessionId] = useState('')
+  const [sessions] = useState<SessionSummary[]>(() => [{ id: getStoredSessionId(), status: '', ready: false, qrAvailable: false, createdAt: '', updatedAt: '' }])
+  const selectedSessionId = sessions[0]?.id ?? 'default'
   const [authenticated, setAuthenticated] = useState(() => !!getToken())
 
   const handleFileSelect = useCallback((file: File | null) => {
@@ -345,23 +341,13 @@ function App() {
   } = useScheduledMessages(apiBaseUrl, selectedSessionId)
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
 
-  const selectedSession = useMemo(
-    () => sessions.find((session) => session.id === selectedSessionId) ?? sessions[0] ?? null,
-    [sessions, selectedSessionId],
-  )
-  const sessionBaseUrl = useMemo(
-    () => `${apiBaseUrl}/sessions/${selectedSessionId}`,
-    [apiBaseUrl, selectedSessionId],
-  )
+  const selectedSession = sessions[0] ?? null
+  const sessionBaseUrl = `${apiBaseUrl}/sessions/${selectedSessionId}`
   const isReady = Boolean(status?.ready)
 
   useEffect(() => {
     groupsCountRef.current = groups.length
   }, [groups.length])
-
-  useEffect(() => {
-    localStorage.setItem(SESSION_STORAGE_KEY, selectedSessionId)
-  }, [selectedSessionId])
 
   const searchedGroups = useMemo(() => {
     const search = normalizeText(debouncedQuery.trim())
@@ -441,7 +427,7 @@ function App() {
   const userPhone = status?.info?.wid?.user ?? null
 
   const fetchStatus = useCallback(async () => {
-    if (!selectedSessionId) return null
+    if (!selectedSessionId || !getToken()) return null
     setStatusState('loading')
     setStatusError('')
 
@@ -467,6 +453,7 @@ function App() {
   }, [apiBaseUrl, selectedSessionId])
 
   const loadGroups = useCallback(async ({ force = false } = {}) => {
+    if (!getToken()) return
     const hasGroups = groupsCountRef.current > 0
     const base = `${apiBaseUrl}/sessions/${selectedSessionId}`
     const nextUrl = force
@@ -942,38 +929,6 @@ function App() {
     }
   }
 
-  const loadSessions = useCallback(async () => {
-    setSessionState('loading')
-    setSessionError('')
-
-    try {
-      const response = await apiFetch(`${apiBaseUrl}/sessions`)
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const data = await response.json() as { ok: boolean; sessions?: SessionSummary[]; error?: string }
-      if (!data.ok) throw new Error(data.error || 'No se pudo cargar sesiones')
-      const nextSessions = data.sessions ?? []
-      setSessions(nextSessions)
-      setSessionState('success')
-
-      if (!nextSessions.some((session) => session.id === selectedSessionId)) {
-        const nextSessionId = nextSessions[0]?.id ?? DEFAULT_SESSION_ID
-        setSelectedSessionId(nextSessionId)
-      }
-
-      return nextSessions
-    } catch (error) {
-      setSessionState('error')
-      setSessionError(error instanceof Error ? error.message : 'No se pudo cargar sesiones')
-      return []
-    }
-  }, [apiBaseUrl, selectedSessionId])
-
-  useEffect(() => {
-    queueMicrotask(() => {
-      loadSessions()
-    })
-  }, [loadSessions])
-
   useEffect(() => {
     if (!selectedSessionId) return
     refreshData()
@@ -986,61 +941,6 @@ function App() {
 
     return () => window.clearInterval(statusInterval)
   }, [fetchStatus])
-
-  const createSession = async () => {
-    const sessionId = newSessionId.trim()
-    if (!sessionId) return
-
-    setSessionError('')
-    setSessionState('loading')
-
-    try {
-      const response = await apiFetch(`${apiBaseUrl}/sessions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId }),
-      })
-      const data = await response.json() as { ok: boolean; session?: SessionSummary; error?: string }
-
-      if (!response.ok || !data.ok || !data.session) {
-        throw new Error(data.error || `HTTP ${response.status}`)
-      }
-
-      setSessions((currentSessions) => [data.session!, ...currentSessions.filter((session) => session.id !== data.session!.id)])
-      setSelectedSessionId(data.session.id)
-      setNewSessionId('')
-      setSessionState('success')
-    } catch (error) {
-      setSessionState('error')
-      setSessionError(error instanceof Error ? error.message : 'No se pudo crear la sesion')
-    }
-  }
-
-  const deleteSession = async () => {
-    if (!selectedSessionId) return
-    setSessionError('')
-    setSessionState('loading')
-
-    try {
-      const response = await apiFetch(`${apiBaseUrl}/sessions/${selectedSessionId}`, { method: 'DELETE' })
-      const data = await response.json() as { ok: boolean; error?: string }
-
-      if (!response.ok || !data.ok) {
-        throw new Error(data.error || `HTTP ${response.status}`)
-      }
-
-      setSessions((currentSessions) => {
-        const nextSessions = currentSessions.filter((session) => session.id !== selectedSessionId)
-        const nextSessionId = nextSessions[0]?.id ?? DEFAULT_SESSION_ID
-        setSelectedSessionId(nextSessionId)
-        return nextSessions
-      })
-      setSessionState('success')
-    } catch (error) {
-      setSessionState('error')
-      setSessionError(error instanceof Error ? error.message : 'No se pudo eliminar la sesion')
-    }
-  }
 
   useEffect(() => {
     if (status?.status === 'ready') {
@@ -1219,66 +1119,13 @@ function App() {
               <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-xs font-semibold text-slate-500">Sesión activa</p>
+                    <p className="text-xs font-semibold text-slate-500">Sesión</p>
                     <p className="mt-1 text-sm font-semibold text-slate-950">{selectedSession?.id ?? 'Cargando...'}</p>
-                    <p className="mt-1 text-xs text-slate-500">{selectedSession?.message ?? 'Selecciona una sesión para conectar.'}</p>
+                    <p className="mt-1 text-xs text-slate-500">{selectedSession?.message ?? 'Esperando conexion.'}</p>
                   </div>
                   <span className={`status-pill ${selectedSession?.ready ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
                     {selectedSession?.ready ? 'Listo' : 'Pendiente'}
                   </span>
-                </div>
-
-                <div className="mt-4 grid gap-3">
-                  <label className="grid gap-2 text-xs font-medium text-slate-700">
-                    Cambiar sesión
-                    <select
-                      className="ui-field px-3 text-sm"
-                      value={selectedSessionId}
-                      onChange={(event) => setSelectedSessionId(event.target.value)}
-                    >
-                      {sessions.length === 0 ? (
-                        <option value="">Cargando sesiones...</option>
-                      ) : (
-                        sessions.map((session) => (
-                          <option key={session.id} value={session.id}>
-                            {session.id}{session.ready ? ' · listo' : ''}
-                          </option>
-                        ))
-                      )}
-                    </select>
-                  </label>
-
-                  <div className="grid gap-2">
-                    <label className="grid gap-2 text-xs font-medium text-slate-700">
-                      Nueva sesión
-                      <input
-                        className="ui-field px-3 text-sm"
-                        value={newSessionId}
-                        onChange={(event) => setNewSessionId(event.target.value)}
-                        placeholder="nombre de sesión"
-                      />
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        className={secondaryButton}
-                        type="button"
-                        onClick={createSession}
-                        disabled={!newSessionId.trim() || sessionState === 'loading'}
-                      >
-                        Crear
-                      </button>
-                      <button
-                        className={dangerButton}
-                        type="button"
-                        onClick={deleteSession}
-                        disabled={!selectedSessionId || selectedSessionId === DEFAULT_SESSION_ID || sessions.length <= 1 || sessionState === 'loading'}
-                      >
-                        Eliminar
-                      </button>
-                    </div>
-                    {sessionError && <p className="text-xs text-rose-600">{sessionError}</p>}
-                    {sessionState === 'loading' && <p className="text-xs text-slate-500">Cargando sesiones...</p>}
-                  </div>
                 </div>
               </div>
             )}

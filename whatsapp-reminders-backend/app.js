@@ -227,11 +227,17 @@ const getWhatsappStatus = (session) => {
     normalizedMessage = 'WhatsApp conectado correctamente'
   }
 
+  const user = session.client?.user
+  const info = user ? {
+    pushname: user.name || user.pushname || '',
+    wid: { user: user.id ? user.id.split(':')[0].split('@')[0] : '' },
+  } : null
+
   return {
     ready: hasActiveSession,
     status: normalizedStatus,
     message: normalizedMessage,
-    info: session.manuallyDisconnected ? null : session.client?.user || null,
+    info: session.manuallyDisconnected ? null : info,
     qr: !session.manuallyDisconnected && session.lastQrDataUrl
       ? { available: true, dataUrl: session.lastQrDataUrl }
       : { available: false, dataUrl: null },
