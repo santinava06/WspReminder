@@ -1,4 +1,9 @@
 const AUTH_TOKEN_KEY = 'auth_token'
+const SESSION_ID_KEY = 'session_id'
+
+export function getStoredSessionId(): string {
+  return localStorage.getItem(SESSION_ID_KEY) || 'default'
+}
 
 export function getToken(): string | null {
   return localStorage.getItem(AUTH_TOKEN_KEY)

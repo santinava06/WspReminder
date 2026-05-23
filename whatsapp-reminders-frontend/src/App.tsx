@@ -15,7 +15,7 @@ import type { SendHistoryItem, SendProgressResult } from './hooks/useSendHistory
 import type { MediaAttachment } from './hooks/useScheduledMessages'
 import useScheduledMessages from './hooks/useScheduledMessages'
 import useSettings from './hooks/useSettings'
-import { apiFetch, getToken } from './api'
+import { apiFetch, getToken, getStoredSessionId } from './api'
 import LoginPage from './components/LoginPage'
 
 type StatusResponse = {
@@ -297,7 +297,7 @@ function App() {
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [sessionState, setSessionState] = useState<LoadState>('idle')
   const [sessionError, setSessionError] = useState('')
-  const [selectedSessionId, setSelectedSessionId] = useState<string>(() => localStorage.getItem(SESSION_STORAGE_KEY) ?? DEFAULT_SESSION_ID)
+  const [selectedSessionId, setSelectedSessionId] = useState<string>(() => getStoredSessionId())
   const [newSessionId, setNewSessionId] = useState('')
   const [authenticated, setAuthenticated] = useState(() => !!getToken())
 

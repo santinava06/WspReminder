@@ -28,6 +28,7 @@ export default function LoginPage({ apiBaseUrl, onLogin }: Props) {
         throw new Error(data.error || 'Credenciales invalidas')
       }
       setToken(data.token)
+      if (data.sessionId) localStorage.setItem('session_id', data.sessionId)
       onLogin()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Error al iniciar sesion')
@@ -56,7 +57,7 @@ export default function LoginPage({ apiBaseUrl, onLogin }: Props) {
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="admin"
+                placeholder="admin1 — admin5"
                 autoFocus
                 autoComplete="username"
               />
@@ -69,7 +70,7 @@ export default function LoginPage({ apiBaseUrl, onLogin }: Props) {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="admin123"
+                placeholder="1234"
                 autoComplete="current-password"
               />
             </label>
