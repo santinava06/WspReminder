@@ -1,6 +1,5 @@
 const { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } = require('fs')
 const { join } = require('path')
-const { MessageMedia } = require('whatsapp-web.js')
 
 const LEGACY_DATA_FILE = join(process.cwd(), '.data', 'scheduled-messages.json')
 
@@ -14,6 +13,50 @@ function ensureDirectory(dir) {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true })
   }
+}
+
+function base64ToBuffer(base64) {
+  if (!base64) return null
+  const raw = base64.includes(',') ? base64.split(',')[1] : base64
+  return Buffer.from(raw, 'base64')
+}
+
+function buildBaileysMessage(payload) {
+  const msg = {}
+  const text = payload.message || payload.text || ''
+  const media = payload.media || null
+
+  if (!media) {
+    msg.text = text
+    return msg
+  }
+
+  const buffer = base64ToBuffer(media.data)
+  if (!buffer) {
+    msg.text = text
+    return msg
+  }
+
+  const mimetype = (media.mimetype || '').toLowerCase()
+  const filename = media.filename || ''
+
+  if (mimetype.startsWith('image/')) {
+    msg.image = buffer
+    if (text) msg.caption = text
+  } else if (mimetype.startsWith('video/')) {
+    msg.video = buffer
+    if (text) msg.caption = text
+  } else if (mimetype.startsWith('audio/')) {
+    msg.audio = buffer
+    msg.ptt = mimetype.includes('ogg')
+  } else {
+    msg.document = buffer
+    msg.mimetype = mimetype || 'application/octet-stream'
+    msg.fileName = filename || 'file'
+    if (text) msg.caption = text
+  }
+
+  return msg
 }
 
 class Scheduler {
@@ -124,24 +167,12 @@ class Scheduler {
     return this.messages.filter(m => ['pending', 'waiting_connection'].includes(m.status) && m.scheduledAt <= now)
   }
 
-  async isClientReady(client) {
-    if (client.info) return true
-
-    try {
-      const state = await Promise.race([
-        client.getState(),
-        new Promise((resolve) => setTimeout(() => resolve(null), 1500)),
-      ])
-
-      return state === 'CONNECTED'
-    } catch {
-      return false
-    }
+  isClientReady(client) {
+    return Boolean(client?.user || client?.ws?.readyState === 1)
   }
 
   markWaitingForConnection(msg) {
     if (msg.status === 'waiting_connection') return
-
     msg.status = 'waiting_connection'
     msg.lastError = 'WhatsApp no esta conectado. El envio se reintentara automaticamente.'
     msg.updatedAt = new Date().toISOString()
@@ -150,7 +181,6 @@ class Scheduler {
 
   async sendScheduledMessage(client, msg) {
     if (this.sendingIds.has(msg.id)) return
-
     this.sendingIds.add(msg.id)
 
     try {
@@ -161,12 +191,8 @@ class Scheduler {
 
       for (const group of msg.groups) {
         try {
-          if (msg.media) {
-            const mediaObj = new MessageMedia(msg.media.mimetype, msg.media.data, msg.media.filename)
-            await client.sendMessage(group.id, msg.message, { media: mediaObj })
-          } else {
-            await client.sendMessage(group.id, msg.message)
-          }
+          const baileysMsg = buildBaileysMessage({ message: msg.message, media: msg.media })
+          await client.sendMessage(group.id, baileysMsg)
           msg.results.push({ groupId: group.id, groupName: group.name, ok: true })
         } catch (err) {
           msg.results.push({ groupId: group.id, groupName: group.name, ok: false, error: err.message })
@@ -185,14 +211,13 @@ class Scheduler {
 
   startChecker(client) {
     if (this.checkInterval) return
-
     this.load()
 
     this.checkInterval = setInterval(async () => {
       const pending = this.getPending()
       if (pending.length === 0) return
 
-      if (!(await this.isClientReady(client))) {
+      if (!this.isClientReady(client)) {
         pending.forEach((msg) => this.markWaitingForConnection(msg))
         return
       }
@@ -202,7 +227,7 @@ class Scheduler {
       }
     }, 10_000)
 
-    console.log(`Scheduler started for ${this.dataFile} (checking every 10s)`)    
+    console.log(`Scheduler started for ${this.dataFile} (checking every 10s)`)
   }
 
   stop() {
@@ -216,4 +241,3 @@ class Scheduler {
 }
 
 module.exports = { createScheduler: (options) => new Scheduler(options) }
-

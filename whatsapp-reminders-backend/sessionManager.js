@@ -1,70 +1,18 @@
 const { join } = require('path')
 const { homedir } = require('os')
 const { existsSync, mkdirSync } = require('fs')
-const { execSync } = require('child_process')
-const { Client } = require('whatsapp-web.js')
-const ResilientLocalAuth = require('./ResilientLocalAuth')
+const { makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys')
 const { createScheduler } = require('./scheduler')
-
-function ensureChromeInstalled() {
-  try {
-    const chromePath = require('puppeteer').executablePath()
-    if (existsSync(chromePath)) {
-      console.log('Chrome encontrado en:', chromePath)
-      return chromePath
-    }
-  } catch {}
-
-  console.log('Chrome no encontrado. Instalando...')
-  try {
-    const cliPath = join(__dirname, 'node_modules', 'puppeteer', 'lib', 'cjs', 'puppeteer', 'node', 'cli.js')
-    if (existsSync(cliPath)) {
-      execSync(`node "${cliPath}" browsers install chrome`, {
-        cwd: __dirname,
-        stdio: 'inherit',
-        timeout: 120_000,
-      })
-    } else {
-      execSync('npx -y puppeteer@24.38.0 browsers install chrome', {
-        cwd: __dirname,
-        stdio: 'inherit',
-        timeout: 120_000,
-      })
-    }
-    const chromePath = require('puppeteer').executablePath()
-    if (existsSync(chromePath)) {
-      console.log('Chrome instalado exitosamente')
-      return chromePath
-    }
-  } catch (err) {
-    console.error('Error instalando Chrome:', err.message)
-  }
-  return undefined
-}
-
-const CHROME_EXECUTABLE_PATH = ensureChromeInstalled()
 
 const DEFAULT_BASE_DATA_DIR = process.env.WHATSAPP_REMINDERS_DATA_DIR || (() => {
   if (process.platform === 'win32') {
     return join(process.env.APPDATA || process.env.LOCALAPPDATA || homedir(), 'WhatsApp Reminders')
   }
-
   return join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'whatsapp-reminders')
 })()
-const DEFAULT_SESSION_ID = process.env.WHATSAPP_SESSION_ID || 'default'
-const DEFAULT_WHATSAPP_PROTOCOL_TIMEOUT_MS = Number.parseInt(process.env.WHATSAPP_PROTOCOL_TIMEOUT_MS, 10) || 300_000
-const DEFAULT_WHATSAPP_AUTH_TIMEOUT_MS = Number.parseInt(process.env.WHATSAPP_AUTH_TIMEOUT_MS, 10) || 180_000
-const DEFAULT_WHATSAPP_INIT_RETRIES = Number.parseInt(process.env.WHATSAPP_INIT_RETRIES, 10) || 3
+const DEFAULT_SESSION_ID = 'default'
 
 const sessions = new Map()
-
-function normalizeSessionId(sessionId) {
-  if (!sessionId || typeof sessionId !== 'string') return null
-  const normalized = sessionId.trim()
-  if (!normalized) return null
-  if (!/^[A-Za-z0-9_-]+$/.test(normalized)) return null
-  return normalized
-}
 
 function getSessionDataDir(sessionId) {
   const sessionDir = join(DEFAULT_BASE_DATA_DIR, 'sessions', sessionId)
@@ -74,39 +22,8 @@ function getSessionDataDir(sessionId) {
   return sessionDir
 }
 
-function createWhatsappClient(sessionId, options) {
-  const sessionDir = getSessionDataDir(sessionId)
-  const authPath = join(sessionDir, 'auth')
-
-  return new Client({
-    authStrategy: new ResilientLocalAuth({
-      clientId: sessionId,
-      dataPath: authPath,
-    }),
-    authTimeoutMs: options.whatsappAuthTimeoutMs,
-    qrMaxRetries: 3,
-    takeoverOnConflict: true,
-    takeoverTimeoutMs: 10_000,
-    puppeteer: {
-      headless: true,
-      executablePath: CHROME_EXECUTABLE_PATH,
-      protocolTimeout: options.whatsappProtocolTimeoutMs,
-      timeout: options.whatsappProtocolTimeoutMs,
-      ignoreDefaultArgs: ['--enable-automation'],
-      args: [
-        '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-        '--disable-gpu', '--disable-extensions', '--disable-background-timer-throttling',
-        '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding',
-        '--disable-blink-features=AutomationControlled',
-        '--no-first-run', '--no-default-browser-check',
-        '--window-size=1280,720',
-      ],
-    },
-  })
-}
-
 function isSessionRunning(session) {
-  return Boolean(session.client && (session.isClientReady || session.client.info))
+  return Boolean(session.client && session.isClientReady)
 }
 
 function sessionSummary(session) {
@@ -121,39 +38,30 @@ function sessionSummary(session) {
   }
 }
 
-function createSession(sessionId, options = {}) {
-  const normalizedSessionId = normalizeSessionId(sessionId)
-  if (!normalizedSessionId) {
-    throw new Error('sessionId invalido. Solo se permiten letras, numeros, guiones y guiones bajos.')
+function createSession(sessionId = DEFAULT_SESSION_ID) {
+  if (sessions.has(sessionId)) {
+    return sessions.get(sessionId)
   }
 
-  if (sessions.has(normalizedSessionId)) {
-    return sessions.get(normalizedSessionId)
-  }
-
-  const sessionDataDir = getSessionDataDir(normalizedSessionId)
+  const sessionDataDir = getSessionDataDir(sessionId)
   const scheduler = createScheduler({ dataDir: sessionDataDir })
-  const client = createWhatsappClient(normalizedSessionId, {
-    whatsappProtocolTimeoutMs: DEFAULT_WHATSAPP_PROTOCOL_TIMEOUT_MS,
-    whatsappAuthTimeoutMs: DEFAULT_WHATSAPP_AUTH_TIMEOUT_MS,
-  })
 
   const session = {
-    id: normalizedSessionId,
+    id: sessionId,
     dataDir: sessionDataDir,
-    client,
+    client: null,
     scheduler,
     isClientReady: false,
     lastQr: null,
     lastQrDataUrl: null,
     sessionStatus: 'starting',
-    lastSessionMessage: 'Iniciando cliente de WhatsApp',
+    lastSessionMessage: 'Iniciando...',
     cachedGroups: [],
     cachedGroupsAt: null,
     groupsRefreshPromise: null,
     manuallyDisconnected: false,
-    whatsappInitializeAttempt: 0,
-    whatsappInitializing: false,
+    groupsSyncTimeoutMs: undefined,
+    groupsCachePersistence: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
@@ -162,132 +70,98 @@ function createSession(sessionId, options = {}) {
     session.updatedAt = new Date().toISOString()
   }
 
-  session.reinitializeClient = async ({ resetAttempts = false } = {}) => {
-    if (session.whatsappInitializing) return
-
-    if (resetAttempts) {
-      session.whatsappInitializeAttempt = 0
-    }
-
-    session.whatsappInitializing = true
-    session.whatsappInitializeAttempt += 1
-    updateTimestamps()
-
+  function makeQRCode(qr) {
     try {
-      console.log(`Inicializando WhatsApp Web para la sesion ${session.id} (intento ${session.whatsappInitializeAttempt}/${DEFAULT_WHATSAPP_INIT_RETRIES})...`)
-      await session.client.initialize()
-    } catch (error) {
-      const errorMessage = error?.message || String(error)
-      console.error(`Error inicializando WhatsApp Web para la sesion ${session.id}:`, errorMessage)
-      session.client.emit('initialization_failure', error)
-
-      if (session.whatsappInitializeAttempt >= DEFAULT_WHATSAPP_INIT_RETRIES) {
-        console.error(
-          `No se pudo inicializar WhatsApp Web para la sesion ${session.id} despues de ${DEFAULT_WHATSAPP_INIT_RETRIES} intentos. ` +
-          'El backend sigue vivo; reinicia la sesion o el proceso.',
-        )
-        return
-      }
-
-      const retryDelayMs = Math.min(10_000 * session.whatsappInitializeAttempt, 30_000)
-      console.log(`Reintentando inicializacion de la sesion ${session.id} en ${Math.round(retryDelayMs / 1000)}s...`)
-      setTimeout(() => {
-        session.reinitializeClient()
-      }, retryDelayMs)
-    } finally {
-      session.whatsappInitializing = false
-    }
-  }
-
-  session.manager = {
-    updateTimestamps,
-  }
-
-  session.client.on('qr', async (qr) => {
-    session.manuallyDisconnected = false
-    session.isClientReady = false
-    session.sessionStatus = 'qr'
-    session.lastQr = qr
-    session.lastSessionMessage = 'Escanea el QR para iniciar sesion'
-    updateTimestamps()
-
-    try {
-      session.lastQrDataUrl = await require('qrcode').toDataURL(qr, { margin: 1, width: 280 })
+      require('qrcode').toDataURL(qr, { margin: 1, width: 280 }).then(url => {
+        session.lastQrDataUrl = url
+      }).catch(() => {
+        session.lastQrDataUrl = null
+      })
     } catch {
       session.lastQrDataUrl = null
     }
-
     try {
       require('qrcode-terminal').generate(qr, { small: true })
-    } catch {
-      // Ignorar si no se puede generar en terminal.
-    }
-  })
+    } catch {}
+  }
 
-  session.client.on('authenticated', () => {
-    session.manuallyDisconnected = false
-    session.sessionStatus = 'authenticated'
-    session.lastSessionMessage = 'WhatsApp autenticado'
-    updateTimestamps()
-  })
+  async function startSocket() {
+    const authPath = join(sessionDataDir, 'auth')
+    const { state, saveCreds } = await useMultiFileAuthState(authPath)
 
-  session.client.on('ready', () => {
-    session.manuallyDisconnected = false
-    session.isClientReady = true
-    session.sessionStatus = 'ready'
-    session.lastQr = null
-    session.lastQrDataUrl = null
-    session.lastSessionMessage = 'WhatsApp conectado correctamente'
-    updateTimestamps()
+    const sock = makeWASocket({
+      auth: state,
+      printQRInTerminal: true,
+      browser: ['WspReminder', '1.0', ''],
+      syncFullHistory: false,
+      generateHighQualityLinkPreview: false,
+      markOnlineOnConnect: false,
+    })
 
-    session.scheduler.startChecker(session.client)
-  })
+    sock.ev.on('creds.update', saveCreds)
 
-  session.client.on('initialization_failure', (error) => {
-    session.isClientReady = false
-    session.sessionStatus = 'initialization_failure'
-    session.lastQr = null
-    session.lastQrDataUrl = null
-    session.lastSessionMessage = error?.message || String(error) || 'No se pudo inicializar WhatsApp Web'
-    updateTimestamps()
-  })
+    sock.ev.on('connection.update', (update) => {
+      updateTimestamps()
+      const { connection, lastDisconnect, qr } = update
 
-  session.client.on('auth_failure', (message) => {
-    session.manuallyDisconnected = false
-    session.isClientReady = false
-    session.sessionStatus = 'auth_failure'
-    session.lastQr = null
-    session.lastQrDataUrl = null
-    session.lastSessionMessage = message
-    updateTimestamps()
-  })
+      if (qr) {
+        session.manuallyDisconnected = false
+        session.isClientReady = false
+        session.lastQr = qr
+        session.sessionStatus = 'qr'
+        session.lastSessionMessage = 'Escanea el QR para iniciar sesion'
+        makeQRCode(qr)
+      }
 
-  session.client.on('disconnected', (reason) => {
-    session.isClientReady = false
-    session.sessionStatus = 'disconnected'
-    session.lastSessionMessage = reason
-    updateTimestamps()
-  })
+      if (connection === 'open') {
+        session.manuallyDisconnected = false
+        session.isClientReady = true
+        session.lastQr = null
+        session.lastQrDataUrl = null
+        session.sessionStatus = 'ready'
+        session.lastSessionMessage = 'WhatsApp conectado correctamente'
+        session.scheduler.startChecker(sock)
+      }
 
-  session.scheduler.startChecker(session.client)
+      if (connection === 'close') {
+        const statusCode = lastDisconnect?.error?.output?.statusCode
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut
+
+        session.isClientReady = false
+        session.lastQr = null
+        session.lastQrDataUrl = null
+
+        if (statusCode === DisconnectReason.loggedOut) {
+          session.sessionStatus = 'logged_out'
+          session.lastSessionMessage = 'Sesion cerrada. Escanea el QR nuevamente.'
+        } else {
+          session.sessionStatus = 'disconnected'
+          session.lastSessionMessage = lastDisconnect?.error?.message || 'Desconectado'
+        }
+
+        if (shouldReconnect && !session.manuallyDisconnected) {
+          setTimeout(startSocket, 5000)
+        }
+      }
+    })
+
+    session.client = sock
+  }
+
+  session.reinitializeClient = async ({ resetAttempts } = {}) => {
+    if (session.manuallyDisconnected) return
+    await startSocket()
+  }
+
+  session.scheduler.startChecker(null)
   session.reinitializeClient()
 
-  sessions.set(normalizedSessionId, session)
+  sessions.set(sessionId, session)
   return session
 }
 
 function getSession(sessionId) {
-  const normalizedSessionId = normalizeSessionId(sessionId)
-  if (!normalizedSessionId) return null
-  return sessions.get(normalizedSessionId) || null
-}
-
-function hasSession(sessionId) {
-  return Boolean(getSession(sessionId))
-}
-
-function listSessions() {
-  return [...sessions.values()].map(sessionSummary)
+  return sessions.get(sessionId) || null
 }
 
 async function destroySession(sessionId) {
@@ -297,24 +171,14 @@ async function destroySession(sessionId) {
   session.manuallyDisconnected = true
   session.sessionStatus = 'disconnected'
   session.lastSessionMessage = 'Sesion detenida'
-  session.manager.updateTimestamps()
-
   session.scheduler.stop()
 
-  try {
-    if (typeof session.client.logout === 'function') {
-      await session.client.logout()
-    }
-  } catch (error) {
-    console.warn(`No se pudo cerrar sesion ${session.id} durante la destruccion:`, error?.message || error)
+  if (session.client && typeof session.client.logout === 'function') {
+    try { await session.client.logout() } catch {}
   }
 
-  try {
-    if (typeof session.client.destroy === 'function') {
-      await session.client.destroy()
-    }
-  } catch (error) {
-    console.warn(`No se pudo destruir el cliente de la sesion ${session.id}:`, error?.message || error)
+  if (session.client && typeof session.client.end === 'function') {
+    try { session.client.end() } catch {}
   }
 
   sessions.delete(sessionId)
@@ -323,11 +187,10 @@ async function destroySession(sessionId) {
 
 module.exports = {
   DEFAULT_SESSION_ID,
-  normalizeSessionId,
   createSession,
   getSession,
-  hasSession,
-  listSessions,
+  hasSession: (id) => sessions.has(id),
+  listSessions: () => [...sessions.values()].map(sessionSummary),
   sessionSummary,
   destroySession,
 }

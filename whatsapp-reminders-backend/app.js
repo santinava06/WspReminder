@@ -1,9 +1,6 @@
 const express = require('express')
-const qrcodeTerminal = require('qrcode-terminal')
-const QRCode = require('qrcode')
 const { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, copyFileSync } = require('fs')
 const { join, resolve } = require('path')
-const { MessageMedia } = require('whatsapp-web.js')
 
 const DEFAULT_GROUPS_SYNC_TIMEOUT_MS = Number.parseInt(process.env.GROUPS_SYNC_TIMEOUT_MS, 10) || 30_000
 
@@ -16,7 +13,6 @@ const normalizeText = (value = '') =>
 
 const normalizeGroupList = (groups) => {
   if (!Array.isArray(groups)) return []
-
   return groups
     .filter(group => group?.id)
     .map(group => ({
@@ -38,10 +34,8 @@ const readPersistedGroupsCache = (session) => {
   if (session.groupsCachePersistence === false) {
     return { groups: [], cachedAt: null }
   }
-
   const groupsCacheFile = getGroupsCacheFile(session)
   const legacyGroupsCacheFile = getLegacyGroupsCacheFile(session)
-
   try {
     if (!existsSync(groupsCacheFile)) {
       if (session.id === 'default' && existsSync(legacyGroupsCacheFile)) {
@@ -49,9 +43,7 @@ const readPersistedGroupsCache = (session) => {
         copyFileSync(legacyGroupsCacheFile, groupsCacheFile)
       }
     }
-
     if (!existsSync(groupsCacheFile)) return { groups: [], cachedAt: null }
-
     const parsedCache = JSON.parse(readFileSync(groupsCacheFile, 'utf8'))
     return {
       groups: normalizeGroupList(parsedCache.groups),
@@ -91,39 +83,13 @@ const initializeSessionGroupsCache = (session) => {
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
-const fetchGroupsDirectlyFromPage = async (client) => {
-  if (!client.pupPage || typeof client.pupPage.evaluate !== 'function') return null
-
-  return client.pupPage.evaluate(() => {
-    const chatCollection = window.require('WAWebCollections').Chat
-    const chats = chatCollection.getModelsArray()
-
-    return chats
-      .filter((chat) => chat.groupMetadata || chat.id?.server === 'g.us' || chat.id?._serialized?.endsWith('@g.us'))
-      .map((chat) => ({
-        name: chat.formattedTitle || chat.name || chat.contact?.formattedName || '(sin nombre)',
-        id: chat.id?._serialized || chat.id?.toString(),
-      }))
-      .filter((group) => group.id)
-  })
-}
-
 const fetchGroupsFromWhatsapp = async (client) => {
-  const directGroups = await fetchGroupsDirectlyFromPage(client)
-
-  if (Array.isArray(directGroups)) {
-    return directGroups.sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }))
-  }
-
-  const chats = await client.getChats()
-
-  return chats
-    .filter(chat => chat.isGroup)
-    .map((chat) => ({
-      name: chat.name || '(sin nombre)',
-      id: chat.id._serialized,
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }))
+  if (typeof client.groupFetchAllParticipating !== 'function') return []
+  const groupsMap = await client.groupFetchAllParticipating()
+  return Object.entries(groupsMap).map(([id, metadata]) => ({
+    id,
+    name: metadata.subject || '(sin nombre)',
+  }))
 }
 
 const refreshGroupsCache = async (session) => {
@@ -142,7 +108,6 @@ const refreshGroupsCache = async (session) => {
         session.groupsRefreshPromise = null
       })
   }
-
   return session.groupsRefreshPromise
 }
 
@@ -164,15 +129,12 @@ const getAllGroups = async (session, { timeoutMs = DEFAULT_GROUPS_SYNC_TIMEOUT_M
 
 const filterGroupsForResponse = (groups, { search, limit }) => {
   let filteredGroups = groups
-
   if (search) {
     filteredGroups = filteredGroups.filter(group => normalizeText(group.name).includes(search))
   }
-
   if (Number.isInteger(limit) && limit > 0) {
     filteredGroups = filteredGroups.slice(0, limit)
   }
-
   return filteredGroups
 }
 
@@ -182,29 +144,66 @@ const refreshGroupsInBackground = (session) => {
   })
 }
 
+function base64ToBuffer(base64) {
+  if (!base64) return null
+  const raw = base64.includes(',') ? base64.split(',')[1] : base64
+  return Buffer.from(raw, 'base64')
+}
+
+function buildBaileysMessage(payload) {
+  const msg = {}
+  const text = payload.message || payload.text || ''
+  const media = payload.media || null
+
+  if (!media) {
+    msg.text = text
+    return msg
+  }
+
+  const buffer = base64ToBuffer(media.data)
+  if (!buffer) {
+    msg.text = text
+    return msg
+  }
+
+  const mimetype = (media.mimetype || '').toLowerCase()
+  const filename = media.filename || ''
+
+  if (mimetype.startsWith('image/')) {
+    msg.image = buffer
+    if (text) msg.caption = text
+  } else if (mimetype.startsWith('video/')) {
+    msg.video = buffer
+    if (text) msg.caption = text
+  } else if (mimetype.startsWith('audio/')) {
+    msg.audio = buffer
+    msg.ptt = mimetype.includes('ogg')
+  } else {
+    msg.document = buffer
+    msg.mimetype = mimetype || 'application/octet-stream'
+    msg.fileName = filename || 'file'
+    if (text) msg.caption = text
+  }
+
+  return msg
+}
+
 const sendReminderToGroups = async (session, groups, message, media = null) => {
   const results = []
-
   for (const group of groups) {
     try {
-      if (media) {
-        const mediaObj = new MessageMedia(media.mimetype, media.data, media.filename)
-        await session.client.sendMessage(group.id, message, { media: mediaObj })
-      } else {
-        await session.client.sendMessage(group.id, message)
-      }
+      const baileysMsg = buildBaileysMessage({ message, media })
+      await session.client.sendMessage(group.id, baileysMsg)
       results.push({ ...group, ok: true })
     } catch (error) {
       results.push({ ...group, ok: false, error: error.message })
     }
   }
-
   return results
 }
 
 const formatSendResults = (results) => {
   const failed = results.filter(result => !result.ok)
-
   return {
     ok: failed.length === 0,
     message: failed.length === 0
@@ -217,39 +216,25 @@ const formatSendResults = (results) => {
   }
 }
 
-const getWhatsappStatus = async (session) => {
-  let state = null
+const getWhatsappStatus = (session) => {
+  const hasActiveSession = !session.manuallyDisconnected && (session.isClientReady || session.client?.user)
 
-  if (!session.manuallyDisconnected && !session.isClientReady && !session.client.info) {
-    try {
-      state = await Promise.race([
-        session.client.getState(),
-        new Promise((resolve) => setTimeout(() => resolve(null), 1500)),
-      ])
-    } catch {
-      state = null
-    }
+  let normalizedStatus = session.sessionStatus
+  let normalizedMessage = session.lastSessionMessage
+
+  if (hasActiveSession && ['starting', 'disconnected'].includes(session.sessionStatus)) {
+    normalizedStatus = 'ready'
+    normalizedMessage = 'WhatsApp conectado correctamente'
   }
-
-  const hasActiveSession = !session.manuallyDisconnected && Boolean(session.isClientReady || state === 'CONNECTED' || session.client.info)
-  const normalizedStatus = hasActiveSession && ['starting', 'disconnected'].includes(session.sessionStatus)
-    ? 'ready'
-    : session.sessionStatus
-  const normalizedMessage = hasActiveSession && ['starting', 'disconnected'].includes(session.sessionStatus)
-    ? 'WhatsApp conectado correctamente'
-    : session.lastSessionMessage
 
   return {
     ready: hasActiveSession,
     status: normalizedStatus,
     message: normalizedMessage,
-    state,
-    info: session.manuallyDisconnected ? null : session.client.info || null,
+    info: session.manuallyDisconnected ? null : session.client?.user || null,
     qr: !session.manuallyDisconnected && session.lastQrDataUrl
       ? { available: true, dataUrl: session.lastQrDataUrl }
       : { available: false, dataUrl: null },
-    chromeProfile: session.usingChromeProfile,
-    chromeRunning: session.chromeRunning,
   }
 }
 
@@ -263,7 +248,7 @@ const ensureWhatsappReady = async (session, res) => {
     return false
   }
 
-  const status = await getWhatsappStatus(session)
+  const status = getWhatsappStatus(session)
 
   if (status.ready) {
     return true
@@ -286,10 +271,9 @@ const createSessionRouter = () => {
   })
 
   router.get('/', (req, res) => {
-    const session = req.session
     res.json({
       ok: true,
-      sessionId: session.id,
+      sessionId: req.session.id,
       message: 'Backend de recordatorios funcionando',
     })
   })
@@ -305,12 +289,8 @@ const createSessionRouter = () => {
         return res.status(400).json({ ok: false, error: 'Faltan groupId o message' })
       }
 
-      if (media) {
-        const mediaObj = new MessageMedia(media.mimetype, media.data, media.filename)
-        await session.client.sendMessage(groupId, message, { media: mediaObj })
-      } else {
-        await session.client.sendMessage(groupId, message)
-      }
+      const baileysMsg = buildBaileysMessage({ message, media })
+      await session.client.sendMessage(groupId, baileysMsg)
 
       res.json({ ok: true, message: 'Recordatorio enviado' })
     } catch (error) {
@@ -421,22 +401,12 @@ const createSessionRouter = () => {
       }
 
       console.error('Error obteniendo grupos:', error)
-
-      if (error.message?.includes('detached Frame')) {
-        return res.status(503).json({
-          ok: false,
-          ready: false,
-          error: 'WhatsApp Web se esta reconectando. Cierra instancias duplicadas del backend o espera unos segundos y vuelve a intentar.',
-        })
-      }
-
       res.status(500).json({ ok: false, error: error.message })
     }
   })
 
-  router.get('/status', async (req, res) => {
-    const status = await getWhatsappStatus(req.session)
-    res.json(status)
+  router.get('/status', (req, res) => {
+    res.json(getWhatsappStatus(req.session))
   })
 
   router.get('/qr', (req, res) => {
@@ -444,7 +414,6 @@ const createSessionRouter = () => {
     if (!session.lastQr || !session.lastQrDataUrl) {
       return res.status(404).json({ ok: false, available: false, error: 'No hay QR disponible en este momento' })
     }
-
     res.json({ ok: true, available: true, qr: session.lastQr, dataUrl: session.lastQrDataUrl })
   })
 
@@ -452,7 +421,7 @@ const createSessionRouter = () => {
     try {
       const session = req.session
 
-      if (!session.isClientReady && !session.client.info) {
+      if (!session.isClientReady && !session.client?.user) {
         return res.status(400).json({ ok: false, error: 'No hay ninguna sesion activa para desconectar' })
       }
 
@@ -471,15 +440,13 @@ const createSessionRouter = () => {
       try {
         await session.client.logout()
       } catch (logoutError) {
-        console.warn('No se pudo cerrar sesion con logout; forzando cierre del cliente:', logoutError?.message || logoutError)
-        if (typeof session.client.destroy === 'function') {
-          await session.client.destroy()
-        } else {
-          throw logoutError
-        }
+        console.warn('No se pudo cerrar sesion con logout:', logoutError?.message || logoutError)
       }
 
-      session.client.info = null
+      if (session.client && typeof session.client.end === 'function') {
+        try { session.client.end() } catch {}
+      }
+
       session.manuallyDisconnected = false
       session.reinitializeClient()
 
@@ -524,125 +491,4 @@ const createSessionRouter = () => {
   return router
 }
 
-function createApp(client, options = {}) {
-  const app = express()
-  app.use(express.json({ limit: '10mb' }))
-
-  const session = {
-    id: 'default',
-    dataDir: options.dataDir || process.cwd(),
-    client,
-    scheduler: options.scheduler === false
-      ? {
-        getAll: () => [],
-        create: () => null,
-        cancel: () => null,
-        stop: () => {},
-        startChecker: () => {},
-      }
-      : {
-        getAll: () => [],
-        create: () => null,
-        cancel: () => null,
-        stop: () => {},
-        startChecker: () => {},
-      },
-    isClientReady: false,
-    lastQr: null,
-    lastQrDataUrl: null,
-    sessionStatus: 'starting',
-    lastSessionMessage: 'Iniciando cliente de WhatsApp',
-    cachedGroups: [],
-    cachedGroupsAt: null,
-    groupsRefreshPromise: null,
-    manuallyDisconnected: false,
-    reinitializeClient: options.reinitializeClient || (() => {}),
-    usingChromeProfile: false,
-    chromeRunning: false,
-    groupsSyncTimeoutMs: options.groupsSyncTimeoutMs,
-    groupsCachePersistence: options.groupsCachePersistence !== false,
-  }
-
-  const attachClientEvents = () => {
-    client.on('qr', async (qr) => {
-      session.manuallyDisconnected = false
-      session.isClientReady = false
-      session.sessionStatus = 'qr'
-      session.lastQr = qr
-      session.lastSessionMessage = 'Escanea el QR para iniciar sesion'
-
-      try {
-        session.lastQrDataUrl = await QRCode.toDataURL(qr, { margin: 1, width: 280 })
-      } catch {
-        session.lastQrDataUrl = null
-      }
-
-      try {
-        qrcodeTerminal.generate(qr, { small: true })
-      } catch {
-        // Ignorar si no se puede generar en terminal.
-      }
-    })
-
-    client.on('authenticated', () => {
-      session.manuallyDisconnected = false
-      session.sessionStatus = 'authenticated'
-      session.lastSessionMessage = 'WhatsApp autenticado'
-    })
-
-    client.on('ready', () => {
-      session.manuallyDisconnected = false
-      session.isClientReady = true
-      session.sessionStatus = 'ready'
-      session.lastQr = null
-      session.lastQrDataUrl = null
-      session.lastSessionMessage = 'WhatsApp conectado correctamente'
-      if (options.scheduler !== false) {
-        session.scheduler.startChecker(client)
-      }
-    })
-
-    client.on('initialization_failure', (error) => {
-      session.isClientReady = false
-      session.sessionStatus = 'initialization_failure'
-      session.lastQr = null
-      session.lastQrDataUrl = null
-      session.lastSessionMessage = error?.message || String(error) || 'No se pudo inicializar WhatsApp Web'
-    })
-
-    client.on('auth_failure', (message) => {
-      session.manuallyDisconnected = false
-      session.isClientReady = false
-      session.sessionStatus = 'auth_failure'
-      session.lastQr = null
-      session.lastQrDataUrl = null
-      session.lastSessionMessage = message
-    })
-
-    client.on('disconnected', (reason) => {
-      session.isClientReady = false
-      session.sessionStatus = 'disconnected'
-      session.lastSessionMessage = reason
-    })
-  }
-
-  attachClientEvents()
-
-  if (options.scheduler !== false) {
-    session.scheduler.startChecker(client)
-  }
-
-  app.get('/', (req, res) => {
-    res.json({ ok: true, message: 'Backend de recordatorios funcionando' })
-  })
-
-  app.use((req, res, next) => {
-    req.session = session
-    next()
-  }, createSessionRouter())
-
-  return app
-}
-
-module.exports = { createSessionRouter, createApp }
-
+module.exports = { createSessionRouter }
