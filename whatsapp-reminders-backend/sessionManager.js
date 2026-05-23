@@ -1,9 +1,48 @@
 const { join } = require('path')
 const { homedir } = require('os')
 const { existsSync, mkdirSync } = require('fs')
+const { execSync } = require('child_process')
 const { Client } = require('whatsapp-web.js')
 const ResilientLocalAuth = require('./ResilientLocalAuth')
 const { createScheduler } = require('./scheduler')
+
+function ensureChromeInstalled() {
+  try {
+    const chromePath = require('puppeteer').executablePath()
+    if (existsSync(chromePath)) {
+      console.log('Chrome encontrado en:', chromePath)
+      return chromePath
+    }
+  } catch {}
+
+  console.log('Chrome no encontrado. Instalando...')
+  try {
+    const cliPath = join(__dirname, 'node_modules', 'puppeteer', 'lib', 'cjs', 'puppeteer', 'node', 'cli.js')
+    if (existsSync(cliPath)) {
+      execSync(`node "${cliPath}" browsers install chrome`, {
+        cwd: __dirname,
+        stdio: 'inherit',
+        timeout: 120_000,
+      })
+    } else {
+      execSync('npx -y puppeteer@24.38.0 browsers install chrome', {
+        cwd: __dirname,
+        stdio: 'inherit',
+        timeout: 120_000,
+      })
+    }
+    const chromePath = require('puppeteer').executablePath()
+    if (existsSync(chromePath)) {
+      console.log('Chrome instalado exitosamente')
+      return chromePath
+    }
+  } catch (err) {
+    console.error('Error instalando Chrome:', err.message)
+  }
+  return undefined
+}
+
+const CHROME_EXECUTABLE_PATH = ensureChromeInstalled()
 
 const DEFAULT_BASE_DATA_DIR = process.env.WHATSAPP_REMINDERS_DATA_DIR || (() => {
   if (process.platform === 'win32') {
@@ -50,6 +89,7 @@ function createWhatsappClient(sessionId, options) {
     takeoverTimeoutMs: 10_000,
     puppeteer: {
       headless: true,
+      executablePath: CHROME_EXECUTABLE_PATH,
       protocolTimeout: options.whatsappProtocolTimeoutMs,
       timeout: options.whatsappProtocolTimeoutMs,
       args: [
