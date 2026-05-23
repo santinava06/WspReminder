@@ -10,11 +10,8 @@ const app = express()
 app.use(cors())
 app.use(express.json({ limit: '10mb' }))
 
-const defaultSession = sessionManager.createSession(sessionManager.DEFAULT_SESSION_ID)
-
-const NUM_AUTO_SESSIONS = Number.parseInt(process.env.NUM_AUTO_SESSIONS, 10) || 5
-for (let i = 2; i <= NUM_AUTO_SESSIONS; i++) {
-  const name = `sesion-${i}`
+const SESSION_NAMES = ['admin1', 'admin2', 'admin3', 'admin4', 'admin5']
+for (const name of SESSION_NAMES) {
   if (!sessionManager.hasSession(name)) {
     sessionManager.createSession(name)
   }

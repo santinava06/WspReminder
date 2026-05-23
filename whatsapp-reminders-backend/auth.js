@@ -1,32 +1,32 @@
 const crypto = require('crypto')
 
 const USERS = {
-  admin1: { password: '1234', sessionId: 'default' },
-  admin2: { password: '1234', sessionId: 'sesion-2' },
-  admin3: { password: '1234', sessionId: 'sesion-3' },
-  admin4: { password: '1234', sessionId: 'sesion-4' },
-  admin5: { password: '1234', sessionId: 'sesion-5' },
+  admin1: { password: '1234' },
+  admin2: { password: '1234' },
+  admin3: { password: '1234' },
+  admin4: { password: '1234' },
+  admin5: { password: '1234' },
 }
 
-const tokenMap = new Map()
+const SALT = 'wsp2024'
+
+function generateToken(username, password) {
+  return crypto.createHash('sha256').update(`${username}:${password}:${SALT}`).digest('hex')
+}
 
 function login(username, password) {
   const user = USERS[username]
   if (!user || user.password !== password) return null
-  const token = crypto.randomUUID()
-  tokenMap.set(token, { username, sessionId: user.sessionId })
-  for (const [t, info] of tokenMap) {
-    if (info.username === username && t !== token) tokenMap.delete(t)
-  }
-  return { token, sessionId: user.sessionId }
+  return { token: generateToken(username, password), sessionId: username }
 }
 
 function authenticate(token) {
-  return tokenMap.get(token) || null
+  for (const username of Object.keys(USERS)) {
+    if (token === generateToken(username, USERS[username].password)) {
+      return { username, sessionId: username }
+    }
+  }
+  return null
 }
 
-function logout(token) {
-  tokenMap.delete(token)
-}
-
-module.exports = { login, authenticate, logout }
+module.exports = { login, authenticate }

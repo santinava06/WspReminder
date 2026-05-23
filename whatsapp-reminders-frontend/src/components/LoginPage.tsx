@@ -53,7 +53,7 @@ export default function LoginPage({ apiBaseUrl, onLogin }: Props) {
             <label className="grid gap-1.5 text-sm font-medium text-slate-700">
               Usuario
               <input
-                className="ui-field px-3 py-2 text-sm"
+                className="w-full rounded-lg border-2 border-slate-300 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-950 focus:bg-white"
                 type="text"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
@@ -66,7 +66,7 @@ export default function LoginPage({ apiBaseUrl, onLogin }: Props) {
             <label className="grid gap-1.5 text-sm font-medium text-slate-700">
               Contrasena
               <input
-                className="ui-field px-3 py-2 text-sm"
+                className="w-full rounded-lg border-2 border-slate-300 bg-slate-50 px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-950 focus:bg-white"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

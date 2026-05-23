@@ -23,5 +23,11 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   if (token) {
     headers.set('Authorization', `Bearer ${token}`)
   }
-  return fetch(input, { ...init, headers })
+  const response = await fetch(input, { ...init, headers })
+  if ((response.status === 401 || response.status === 403) && token) {
+    clearToken()
+    localStorage.removeItem('session_id')
+    window.location.reload()
+  }
+  return response
 }
