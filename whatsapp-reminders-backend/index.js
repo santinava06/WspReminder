@@ -46,6 +46,19 @@ function authMiddleware(req, res, next) {
 
 app.use(authMiddleware)
 
+app.get('/debug', (req, res) => {
+  const s = sessionManager.getSession(req.userSessionId)
+  res.json({
+    ok: true,
+    user: req.username,
+    sessionId: req.userSessionId,
+    clientExists: !!s?.client,
+    clientReady: s?.isClientReady,
+    status: s?.sessionStatus,
+    userInfo: s?.client?.user ? { id: s.client.user.id, name: s.client.user.name } : null,
+  })
+})
+
 app.get('/', (req, res) => {
   res.json({ ok: true, message: 'Backend de recordatorios funcionando' })
 })

@@ -87,8 +87,20 @@ function createSession(sessionId = DEFAULT_SESSION_ID) {
 
   async function startSocket() {
     const authPath = join(sessionDataDir, 'auth')
-    const { state, saveCreds } = await useMultiFileAuthState(authPath)
 
+    let state, saveCreds
+    try {
+      const r = await useMultiFileAuthState(authPath)
+      state = r.state
+      saveCreds = r.saveCreds
+    } catch (err) {
+      console.error(`[${session.id}] Error loading auth state:`, err.message)
+      session.sessionStatus = 'disconnected'
+      session.lastSessionMessage = 'Error al cargar credenciales: ' + err.message
+      return
+    }
+
+    console.log(`[${session.id}] Starting Baileys socket...`)
     const sock = makeWASocket({
       auth: state,
       printQRInTerminal: true,
@@ -103,6 +115,8 @@ function createSession(sessionId = DEFAULT_SESSION_ID) {
     sock.ev.on('connection.update', (update) => {
       updateTimestamps()
       const { connection, lastDisconnect, qr } = update
+
+      console.log(`[${session.id}] connection.update:`, JSON.stringify({ connection, hasQr: !!qr, lastError: lastDisconnect?.error?.message }))
 
       if (qr) {
         session.manuallyDisconnected = false
@@ -130,6 +144,8 @@ function createSession(sessionId = DEFAULT_SESSION_ID) {
         session.isClientReady = false
         session.lastQr = null
         session.lastQrDataUrl = null
+
+        console.log(`[${session.id}] Connection closed. statusCode: ${statusCode}, shouldReconnect: ${shouldReconnect}, reason: ${lastDisconnect?.error?.message}`)
 
         if (statusCode === DisconnectReason.loggedOut) {
           session.sessionStatus = 'logged_out'
