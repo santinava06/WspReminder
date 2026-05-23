@@ -16,7 +16,7 @@ services:
       - key: WHATSAPP_REMINDERS_DATA_DIR
         value: /tmp/whatsapp-reminders-data
 
-  - type: static_site
+  - type: static
     name: whatsapp-reminders-frontend
     branch: main
     root: whatsapp-reminders-frontend
