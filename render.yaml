@@ -4,7 +4,7 @@ services:
     env: node
     branch: main
     root: whatsapp-reminders-backend
-    buildCommand: npm install && npx puppeteer browsers install chrome
+    buildCommand: npm install && node node_modules/puppeteer/lib/cjs/puppeteer/node/cli.js browsers install chrome
     startCommand: npm start
     envVars:
       - key: HOST
