@@ -84,7 +84,7 @@ function createWhatsappClient(sessionId, options) {
       dataPath: authPath,
     }),
     authTimeoutMs: options.whatsappAuthTimeoutMs,
-    qrMaxRetries: 0,
+    qrMaxRetries: 3,
     takeoverOnConflict: true,
     takeoverTimeoutMs: 10_000,
     puppeteer: {
@@ -92,10 +92,13 @@ function createWhatsappClient(sessionId, options) {
       executablePath: CHROME_EXECUTABLE_PATH,
       protocolTimeout: options.whatsappProtocolTimeoutMs,
       timeout: options.whatsappProtocolTimeoutMs,
+      ignoreDefaultArgs: ['--enable-automation'],
       args: [
         '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
         '--disable-gpu', '--disable-extensions', '--disable-background-timer-throttling',
         '--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding',
+        '--disable-blink-features=AutomationControlled',
+        '--no-first-run', '--no-default-browser-check',
         '--window-size=1280,720',
       ],
     },
