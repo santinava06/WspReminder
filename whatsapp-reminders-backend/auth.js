@@ -19,7 +19,7 @@ function generateToken(username, password) {
 function login(username, password) {
   const user = userMap[username]
   if (!user || user.password !== password) return null
-  return { token: generateToken(username, password), sessionId: user.sessionId, displayName: user.displayName }
+  return { token: generateToken(username, password), sessionId: user.sessionId, displayName: user.displayName, username: user.username }
 }
 
 function authenticate(token) {
@@ -31,4 +31,10 @@ function authenticate(token) {
   return null
 }
 
-module.exports = { login, authenticate }
+const sessionToUser = Object.fromEntries(USERS.map(u => [u.sessionId, u]))
+
+function getUserBySessionId(sessionId) {
+  return sessionToUser[sessionId] || null
+}
+
+module.exports = { login, authenticate, getUserBySessionId, USERS }

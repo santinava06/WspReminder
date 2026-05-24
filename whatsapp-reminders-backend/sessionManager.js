@@ -38,13 +38,13 @@ function sessionSummary(session) {
   }
 }
 
-function createSession(sessionId = DEFAULT_SESSION_ID) {
+function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {}) {
   if (sessions.has(sessionId)) {
     return sessions.get(sessionId)
   }
 
   const sessionDataDir = getSessionDataDir(sessionId)
-  const scheduler = createScheduler({ dataDir: sessionDataDir })
+  const scheduler = createScheduler({ dataDir: sessionDataDir, onSendScheduled })
 
   const session = {
     id: sessionId,

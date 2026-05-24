@@ -5,9 +5,9 @@ import {
   CheckSquare,
   History,
   Moon,
+  Shield,
   RefreshCw,
   Search,
-  Settings,
   SidebarClose,
   SidebarOpen,
   Sparkles,
@@ -24,13 +24,14 @@ type CommandPaletteProps = {
   sidebarCollapsed: boolean
   onOpenChange: (open: boolean) => void
   onRefresh: () => void
-  onOpenSettings: () => void
   onOpenHistory: () => void
   onToggleTheme: () => void
   onToggleSidebar: () => void
   onSelectAllFiltered: () => void
   onClearSelection: () => void
   onSelectGroup: (group: Group) => void
+  isAdmin?: boolean
+  onOpenAdmin?: () => void
 }
 
 export default function CommandPalette({
@@ -40,13 +41,14 @@ export default function CommandPalette({
   sidebarCollapsed,
   onOpenChange,
   onRefresh,
-  onOpenSettings,
   onOpenHistory,
   onToggleTheme,
   onToggleSidebar,
   onSelectAllFiltered,
   onClearSelection,
   onSelectGroup,
+  isAdmin,
+  onOpenAdmin,
 }: CommandPaletteProps) {
   const [search, setSearch] = useState('')
   const visibleGroups = useMemo(() => groups.slice(0, 80), [groups])
@@ -119,13 +121,15 @@ export default function CommandPalette({
             title="Recargar datos"
             onSelect={() => runCommand(onRefresh)}
           />
-          <CommandItem
-            icon={<Settings size={16} />}
-            meta="Ajustes"
-            subtitle="Backend, tema, densidad y color accent."
-            title="Abrir ajustes"
-            onSelect={() => runCommand(onOpenSettings)}
-          />
+          {isAdmin && onOpenAdmin && (
+            <CommandItem
+              icon={<Shield size={16} />}
+              meta="Admin"
+              subtitle="Usuarios, historial, programados, estadisticas y config."
+              title="Panel de administracion"
+              onSelect={() => runCommand(onOpenAdmin)}
+            />
+          )}
           <CommandItem
             icon={<History size={16} />}
             meta="Historial"

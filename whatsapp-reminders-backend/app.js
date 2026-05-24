@@ -1,6 +1,7 @@
 const express = require('express')
 const { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, copyFileSync } = require('fs')
 const { join, resolve } = require('path')
+const history = require('./history')
 
 const DEFAULT_GROUPS_SYNC_TIMEOUT_MS = Number.parseInt(process.env.GROUPS_SYNC_TIMEOUT_MS, 10) || 30_000
 
@@ -298,6 +299,15 @@ const createSessionRouter = () => {
       const baileysMsg = buildBaileysMessage({ message, media })
       await session.client.sendMessage(groupId, baileysMsg)
 
+      const groupInfo = session.cachedGroups.find(g => g.id === groupId) || { id: groupId, name: groupId }
+      const results = [{ id: groupInfo.id, name: groupInfo.name, ok: true }]
+      history.logSend(req.username || session.id, req.username || session.id, {
+        message,
+        results,
+        hasMedia: !!media,
+        mode: 'single',
+      })
+
       res.json({ ok: true, message: 'Recordatorio enviado' })
     } catch (error) {
       console.error('Error enviando mensaje:', error)
@@ -318,6 +328,13 @@ const createSessionRouter = () => {
 
       const groups = await getAllGroups(session)
       const results = await sendReminderToGroups(session, groups, message, media)
+
+      history.logSend(req.username || session.id, req.username || session.id, {
+        message,
+        results,
+        hasMedia: !!media,
+        mode: 'all',
+      })
 
       res.json(formatSendResults(results))
     } catch (error) {
@@ -345,6 +362,12 @@ const createSessionRouter = () => {
       }
 
       const results = await sendReminderToGroups(session, groups, message, media)
+      history.logSend(req.username || session.id, req.username || session.id, {
+        message,
+        results,
+        hasMedia: !!media,
+        mode: 'selected',
+      })
       res.json(formatSendResults(results))
     } catch (error) {
       console.error('Error enviando mensaje a grupos seleccionados:', error)
@@ -478,7 +501,7 @@ const createSessionRouter = () => {
         return res.status(400).json({ ok: false, error: 'Faltan groups, message o scheduledAt' })
       }
 
-      const scheduled = session.scheduler.create({ groups, message, scheduledAt, media })
+      const scheduled = session.scheduler.create({ groups, message, scheduledAt, media, username: req.username || session.id })
       res.status(201).json({ ok: true, message: 'Mensaje programado', scheduled })
     } catch (error) {
       console.error('Error programando mensaje:', error)
@@ -497,4 +520,4 @@ const createSessionRouter = () => {
   return router
 }
 
-module.exports = { createSessionRouter }
+module.exports = { createSessionRouter, clearPersistedGroupsCache }

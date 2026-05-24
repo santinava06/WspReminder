@@ -60,12 +60,13 @@ function buildBaileysMessage(payload) {
 }
 
 class Scheduler {
-  constructor({ dataDir } = {}) {
+  constructor({ dataDir, onSendScheduled } = {}) {
     this.dataDir = dataDir
     this.dataFile = join(this.dataDir, 'scheduled-messages.json')
     this.messages = []
     this.checkInterval = null
     this.sendingIds = new Set()
+    this.onSendScheduled = onSendScheduled || null
 
     this.load()
   }
@@ -115,7 +116,7 @@ class Scheduler {
     return this.messages.find(m => m.id === id) || null
   }
 
-  create({ groups, message, scheduledAt, media }) {
+  create({ groups, message, scheduledAt, media, username }) {
     const msg = {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       groups,
@@ -126,6 +127,7 @@ class Scheduler {
       results: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      username: username || null,
     }
 
     if (media) {
@@ -204,6 +206,14 @@ class Scheduler {
       msg.lastError = failed.length > 0 ? `${failed.length} grupos fallaron al enviar.` : null
       msg.updatedAt = new Date().toISOString()
       this.update(msg)
+
+      if (typeof this.onSendScheduled === 'function') {
+        try {
+          this.onSendScheduled(msg)
+        } catch (err) {
+          console.error('Error in onSendScheduled callback:', err.message)
+        }
+      }
     } finally {
       this.sendingIds.delete(msg.id)
     }
@@ -240,4 +250,4 @@ class Scheduler {
   }
 }
 
-module.exports = { createScheduler: (options) => new Scheduler(options) }
+module.exports = { createScheduler: (options) => new Scheduler(options), Scheduler }

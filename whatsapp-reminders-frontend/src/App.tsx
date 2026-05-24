@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, FormEvent } from 'react'
-import { Calendar, Command as CommandIcon, History, Image, PanelLeftClose, PanelLeftOpen, RefreshCw, Send, Settings, SunMoon } from 'lucide-react'
+import { Calendar, Command as CommandIcon, History, Image, PanelLeftClose, PanelLeftOpen, RefreshCw, Send, SunMoon } from 'lucide-react'
 import CommandPalette from './components/CommandPalette'
 import GroupList from './components/GroupList'
 import type { Group } from './components/GroupList'
+import AdminPanel from './components/AdminPanel'
 import ScheduleModal from './components/ScheduleModal'
 import ScheduledPanel from './components/ScheduledPanel'
 import SendConfirmationModal from './components/SendConfirmationModal'
@@ -296,6 +297,8 @@ function App() {
   const [authenticated, setAuthenticated] = useState(() => !!getToken())
   const sessionId = useMemo(() => getStoredSessionId(), [authenticated])
   const displayName = useMemo(() => localStorage.getItem('display_name') || sessionId, [sessionId])
+  const username = useMemo(() => localStorage.getItem('username') || '', [authenticated])
+  const isAdmin = username === 'admin'
   const sessions = useMemo<SessionSummary[]>(() => [{ id: sessionId, status: '', ready: false, qrAvailable: false, createdAt: '', updatedAt: '' }], [sessionId])
   const selectedSessionId = sessionId
 
@@ -328,7 +331,7 @@ function App() {
   const [currentSendIndex, setCurrentSendIndex] = useState(0)
   const [currentGroupName, setCurrentGroupName] = useState('')
   const { sendHistory, openHistoryId, setOpenHistoryId, addSendHistoryItem, clearSendHistory } = useSendHistory()
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isAdminOpen, setIsAdminOpen] = useState(false)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingSendConfirmation | null>(null)
@@ -975,15 +978,11 @@ function App() {
         setIsHistoryOpen(false)
         return
       }
-
-      if (isSettingsOpen) {
-        setIsSettingsOpen(false)
-      }
     }
 
     window.addEventListener('keydown', closeTopLayer)
     return () => window.removeEventListener('keydown', closeTopLayer)
-  }, [isHistoryOpen, isSettingsOpen, pendingConfirmation, sendState])
+  }, [isHistoryOpen, pendingConfirmation, sendState])
 
   useEffect(() => {
     const openCommandPalette = (event: KeyboardEvent) => {
@@ -1058,10 +1057,11 @@ function App() {
             <SunMoon size={16} />
             <span>{resolvedTheme === 'dark' ? 'Claro' : 'Oscuro'}</span>
           </button>
-          <button className={secondaryButton} type="button" onClick={() => setIsSettingsOpen(true)}>
-            <Settings size={16} />
-            <span>Ajustes</span>
-          </button>
+          {isAdmin && (
+            <button className={secondaryButton} type="button" onClick={() => setIsAdminOpen(true)}>
+              <span>Admin</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -1129,6 +1129,19 @@ function App() {
                     {selectedSession?.ready ? 'Listo' : 'Pendiente'}
                   </span>
                 </div>
+                <button
+                  className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                  type="button"
+                  onClick={() => {
+                    localStorage.removeItem('auth_token')
+                    localStorage.removeItem('session_id')
+                    localStorage.removeItem('display_name')
+                    localStorage.removeItem('username')
+                    window.location.reload()
+                  }}
+                >
+                  Cerrar sesion
+                </button>
               </div>
             )}
             <dl className={`mt-4 grid gap-2 text-center ${settings.sidebarCollapsed ? 'grid-cols-1' : 'grid-cols-3'}`}>
@@ -1572,143 +1585,15 @@ function App() {
       sidebarCollapsed={settings.sidebarCollapsed}
       onOpenChange={setIsCommandPaletteOpen}
       onRefresh={refreshData}
-      onOpenSettings={() => setIsSettingsOpen(true)}
       onOpenHistory={() => setIsHistoryOpen(true)}
+      isAdmin={isAdmin}
+      onOpenAdmin={isAdmin ? () => setIsAdminOpen(true) : undefined}
       onToggleTheme={toggleTheme}
       onToggleSidebar={toggleSidebar}
       onSelectAllFiltered={selectFilteredGroups}
       onClearSelection={clearSelectedGroups}
       onSelectGroup={selectSingleGroup}
     />
-    {isSettingsOpen && (
-      <div className="modal-overlay fixed inset-0 z-50 grid place-items-center bg-slate-950/35 px-4 py-6 backdrop-blur-md" onClick={() => setIsSettingsOpen(false)}>
-        <section
-          className="modal-surface surface-panel max-h-[calc(100vh-3rem)] w-full max-w-2xl overflow-auto"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="settings-title"
-          onClick={(event) => event.stopPropagation()}
-        >
-          <div className="border-b !border-slate-200/70 bg-slate-50/80 px-5 py-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="section-kicker">Ajustes</p>
-                <h2 className="mt-1 text-xl font-semibold text-slate-950" id="settings-title">Configuracion local</h2>
-              </div>
-              <button
-                className="icon-btn"
-                type="button"
-                aria-label="Cerrar ajustes"
-                onClick={() => setIsSettingsOpen(false)}
-              >
-                X
-              </button>
-            </div>
-          </div>
-
-          <div className="grid gap-4 p-5">
-            <label className="grid gap-2 text-sm font-medium text-slate-950" htmlFor="api-base-url">
-              URL del backend
-              <input
-                className="ui-field bg-slate-50 px-3 text-sm font-normal"
-                id="api-base-url"
-                value={settings.apiBaseUrl}
-                onChange={(event) => updateApiBaseUrl(event.target.value)}
-                placeholder="http://localhost:3000"
-              />
-              <span className="text-xs font-normal text-slate-500">Cambialo si tu backend corre en otro puerto.</span>
-            </label>
-
-            <label className="grid gap-2 text-sm font-medium text-slate-950" htmlFor="settings-delay-seconds">
-              Delay por defecto
-              <input
-                className="ui-field bg-slate-50 px-3 text-sm font-normal"
-                id="settings-delay-seconds"
-                min={0}
-                max={60}
-                type="number"
-                value={delaySeconds}
-                onChange={(event) => updateDelaySeconds(Number(event.target.value) || 0)}
-              />
-              <span className="text-xs font-normal text-slate-500">0 a 60 segundos.</span>
-            </label>
-
-            <section className="surface-card bg-slate-50 p-4">
-              <div>
-                <p className="text-sm font-medium text-slate-950">Apariencia</p>
-                <p className="mt-1 text-xs text-slate-500">Personaliza densidad, color y profundidad visual.</p>
-              </div>
-
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                <label className="grid gap-1 text-sm font-medium text-slate-950">
-                  Tema
-                  <select
-                    className="ui-field min-h-10 px-3 text-sm font-normal"
-                    value={settings.theme}
-                    onChange={(event) => updateTheme(event.target.value as typeof settings.theme)}
-                  >
-                    <option value="light">Claro</option>
-                    <option value="dark">Oscuro</option>
-                    <option value="system">Sistema</option>
-                  </select>
-                </label>
-
-                <label className="grid gap-1 text-sm font-medium text-slate-950">
-                  Densidad
-                  <select
-                    className="ui-field min-h-10 px-3 text-sm font-normal"
-                    value={settings.density}
-                    onChange={(event) => updateDensity(event.target.value as typeof settings.density)}
-                  >
-                    <option value="comfortable">Comoda</option>
-                    <option value="compact">Compacta</option>
-                  </select>
-                </label>
-
-                <label className="grid gap-1 text-sm font-medium text-slate-950">
-                  Color accent
-                  <select
-                    className="ui-field min-h-10 px-3 text-sm font-normal"
-                    value={settings.accentColor}
-                    onChange={(event) => updateAccentColor(event.target.value as typeof settings.accentColor)}
-                  >
-                    <option value="emerald">Emerald</option>
-                    <option value="blue">Blue</option>
-                    <option value="violet">Violet</option>
-                    <option value="rose">Rose</option>
-                    <option value="amber">Amber</option>
-                    <option value="slate">Slate</option>
-                  </select>
-                </label>
-
-                <label className="grid gap-1 text-sm font-medium text-slate-950">
-                  Blur
-                  <select
-                    className="ui-field min-h-10 px-3 text-sm font-normal"
-                    value={settings.blurIntensity}
-                    onChange={(event) => updateBlurIntensity(event.target.value as typeof settings.blurIntensity)}
-                  >
-                    <option value="low">Bajo</option>
-                    <option value="medium">Medio</option>
-                    <option value="high">Alto</option>
-                  </select>
-                </label>
-              </div>
-            </section>
-          </div>
-
-          <div className="flex flex-col-reverse gap-2 border-t !border-slate-200/70 bg-slate-50/80 px-5 py-4 sm:flex-row sm:justify-between">
-            <button className={secondaryButton} type="button" onClick={resetSettings}>
-              Restaurar defaults
-            </button>
-            <button className={primaryButton} type="button" onClick={() => setIsSettingsOpen(false)}>
-              Guardar ajustes
-            </button>
-          </div>
-        </section>
-      </div>
-    )}
-
     {isHistoryOpen && (
       <div className="modal-overlay fixed inset-0 z-50 grid place-items-center bg-slate-950/35 px-4 py-6 backdrop-blur-md" onClick={() => setIsHistoryOpen(false)}>
         <section
@@ -1842,6 +1727,23 @@ function App() {
           </div>
         </section>
       </div>
+    )}
+
+    {isAdminOpen && (
+      <AdminPanel
+        apiBaseUrl={apiBaseUrl}
+        delaySeconds={delaySeconds}
+        formatDate={formatDate}
+        onClose={() => setIsAdminOpen(false)}
+        resetSettings={resetSettings}
+        settings={settings}
+        updateAccentColor={updateAccentColor}
+        updateApiBaseUrl={updateApiBaseUrl}
+        updateBlurIntensity={updateBlurIntensity}
+        updateDelaySeconds={updateDelaySeconds}
+        updateDensity={updateDensity}
+        updateTheme={updateTheme}
+      />
     )}
 
     <ScheduleModal
