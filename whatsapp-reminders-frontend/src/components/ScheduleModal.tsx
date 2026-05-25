@@ -50,7 +50,7 @@ export default function ScheduleModal({
     setFeedback('')
 
     try {
-      const scheduledAt = `${scheduleDate}T${scheduleTime}:00`
+      const scheduledAt = new Date(`${scheduleDate}T${scheduleTime}:00`).toISOString()
       await onCreateScheduled(destinationGroups, reminderMessage, scheduledAt, mediaAttachment || undefined)
       setFeedback('Mensaje programado correctamente')
       setFeedbackType('success')
