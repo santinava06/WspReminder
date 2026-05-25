@@ -220,6 +220,7 @@ class Scheduler {
   }
 
   startChecker(client) {
+    this._client = client
     if (this.checkInterval) return
     this.load()
 
@@ -227,13 +228,13 @@ class Scheduler {
       const pending = this.getPending()
       if (pending.length === 0) return
 
-      if (!this.isClientReady(client)) {
+      if (!this.isClientReady(this._client)) {
         pending.forEach((msg) => this.markWaitingForConnection(msg))
         return
       }
 
       for (const msg of pending) {
-        await this.sendScheduledMessage(client, msg)
+        await this.sendScheduledMessage(this._client, msg)
       }
     }, 10_000)
 

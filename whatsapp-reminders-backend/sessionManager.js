@@ -169,7 +169,6 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
     await startSocket()
   }
 
-  session.scheduler.startChecker(null)
   session.reinitializeClient()
 
   sessions.set(sessionId, session)
