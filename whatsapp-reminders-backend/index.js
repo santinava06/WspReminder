@@ -11,7 +11,7 @@ const app = express()
 app.use(cors())
 app.use(express.json({ limit: '10mb' }))
 
-const SESSION_NAMES = ['admin', 'comercial-1', 'comercial-2', 'academico-1', 'in']
+const SESSION_NAMES = ['admin', 'comercial-1', 'comercial-2', 'academico-1', 'in', 'luciana']
 
 function onSendCallback(msg) {
   const user = auth.getUserBySessionId(msg.sessionId || msg.username)

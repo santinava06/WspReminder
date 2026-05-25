@@ -16,7 +16,7 @@ Aplicación para enviar recordatorios masivos a grupos de WhatsApp desde el nave
 whatsapp-reminders-backend/   # API Express + Baileys
   index.js                    # Servidor, rutas, middleware auth
   app.js                      # Router de sesión (envío, grupos, QR)
-  auth.js                     # 5 usuarios hardcodeados, tokens hash
+  auth.js                     # 6 usuarios hardcodeados, tokens hash
   sessionManager.js           # Gestión de sesiones Baileys
   scheduler.js                # Mensajes programados
   history.js                  # Historial de envíos
@@ -50,6 +50,7 @@ whatsapp-reminders-frontend/  # SPA React
 | comercial2 | Com2#2024 | comercial-2 | Comercial 2 |
 | academico1 | Acad1#2024 | academico-1 | Académico 1 |
 | in | IN#2024 | in | IN |
+| luciana | in2024 | luciana | Luciana |
 
 > Solo el usuario **admin** puede acceder al panel de administración.
 

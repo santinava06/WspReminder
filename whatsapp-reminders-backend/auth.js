@@ -6,6 +6,7 @@ const USERS = [
   { username: 'comercial2', password: 'Com2#2024', sessionId: 'comercial-2', displayName: 'Comercial 2' },
   { username: 'academico1', password: 'Acad1#2024', sessionId: 'academico-1', displayName: 'Académico 1' },
   { username: 'in', password: 'IN#2024', sessionId: 'in', displayName: 'IN' },
+  { username: 'luciana', password: 'in2024', sessionId: 'luciana', displayName: 'Luciana' },
 ]
 
 const userMap = Object.fromEntries(USERS.map(u => [u.username, u]))
