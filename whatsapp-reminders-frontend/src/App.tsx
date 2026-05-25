@@ -6,6 +6,7 @@ import GroupList from './components/GroupList'
 import type { Group } from './components/GroupList'
 import AdminPanel from './components/AdminPanel'
 import ScheduleModal from './components/ScheduleModal'
+import ScheduledMessagesModal from './components/ScheduledMessagesModal'
 import ScheduledPanel from './components/ScheduledPanel'
 import SendConfirmationModal from './components/SendConfirmationModal'
 import Titlebar from './components/Titlebar'
@@ -332,6 +333,7 @@ function App() {
   const [currentGroupName, setCurrentGroupName] = useState('')
   const { sendHistory, openHistoryId, setOpenHistoryId, addSendHistoryItem, clearSendHistory } = useSendHistory()
   const [isAdminOpen, setIsAdminOpen] = useState(false)
+  const [isScheduledOpen, setIsScheduledOpen] = useState(false)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingSendConfirmation | null>(null)
@@ -978,11 +980,16 @@ function App() {
         setIsHistoryOpen(false)
         return
       }
+
+      if (isScheduledOpen) {
+        setIsScheduledOpen(false)
+        return
+      }
     }
 
     window.addEventListener('keydown', closeTopLayer)
     return () => window.removeEventListener('keydown', closeTopLayer)
-  }, [isHistoryOpen, pendingConfirmation, sendState])
+  }, [isHistoryOpen, isScheduledOpen, pendingConfirmation, sendState])
 
   useEffect(() => {
     const openCommandPalette = (event: KeyboardEvent) => {
@@ -1062,6 +1069,10 @@ function App() {
               <span>Admin</span>
             </button>
           )}
+          <button className={ghostButton} type="button" onClick={() => setIsScheduledOpen(true)}>
+            <Calendar size={16} />
+            <span>Programados</span>
+          </button>
         </div>
       </header>
 
@@ -1743,6 +1754,17 @@ function App() {
         updateDelaySeconds={updateDelaySeconds}
         updateDensity={updateDensity}
         updateTheme={updateTheme}
+      />
+    )}
+
+    {isScheduledOpen && (
+      <ScheduledMessagesModal
+        formatDate={formatDate}
+        loadState={scheduledLoadState}
+        messages={scheduledMessages}
+        onCancel={cancelScheduled}
+        onClose={() => setIsScheduledOpen(false)}
+        statusLabel={statusLabel}
       />
     )}
 
