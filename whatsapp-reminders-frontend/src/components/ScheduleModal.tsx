@@ -2,6 +2,15 @@ import { useState } from 'react'
 import type { Group } from './GroupList'
 import type { MediaAttachment, ScheduledMessage } from '../hooks/useScheduledMessages'
 
+function defaultScheduleValue() {
+  const d = new Date()
+  d.setHours(d.getHours() + 1, 0, 0, 0)
+  return {
+    date: d.toISOString().slice(0, 10),
+    time: d.toISOString().slice(11, 16),
+  }
+}
+
 type ScheduleModalProps = {
   open: boolean
   message: string
@@ -13,7 +22,7 @@ type ScheduleModalProps = {
   mediaName?: string | null
   mediaAttachment?: MediaAttachment | null
   onClose: () => void
-  onCreateScheduled: (groups: Group[], message: string, scheduledAt: string, media?: MediaAttachment) => Promise<ScheduledMessage>
+  onCreateScheduled: (groups: Group[], message: string, scheduledAt: string, media?: MediaAttachment, title?: string) => Promise<ScheduledMessage>
 }
 
 export default function ScheduleModal({
@@ -29,8 +38,9 @@ export default function ScheduleModal({
   onClose,
   onCreateScheduled,
 }: ScheduleModalProps) {
-  const [scheduleDate, setScheduleDate] = useState('')
-  const [scheduleTime, setScheduleTime] = useState('')
+  const [scheduleDate, setScheduleDate] = useState(() => defaultScheduleValue().date)
+  const [scheduleTime, setScheduleTime] = useState(() => defaultScheduleValue().time)
+  const [scheduleTitle, setScheduleTitle] = useState('')
   const [feedback, setFeedback] = useState('')
   const [feedbackType, setFeedbackType] = useState<'success' | 'error'>('success')
   const [saving, setSaving] = useState(false)
@@ -51,7 +61,7 @@ export default function ScheduleModal({
 
     try {
       const scheduledAt = new Date(`${scheduleDate}T${scheduleTime}:00`).toISOString()
-      await onCreateScheduled(destinationGroups, reminderMessage, scheduledAt, mediaAttachment || undefined)
+      await onCreateScheduled(destinationGroups, reminderMessage, scheduledAt, mediaAttachment || undefined, scheduleTitle.trim() || undefined)
       setFeedback('Mensaje programado correctamente')
       setFeedbackType('success')
       onClose()
@@ -114,6 +124,18 @@ export default function ScheduleModal({
               {mediaName && <p className="mt-1 text-xs text-slate-500">{mediaName}</p>}
             </div>
           )}
+
+          <label className="grid gap-2 text-sm font-medium text-slate-950" htmlFor="schedule-title">
+            Identificador
+            <input
+              className="ui-field px-3 py-2.5 text-sm font-normal"
+              id="schedule-title"
+              value={scheduleTitle}
+              onChange={(e) => setScheduleTitle(e.target.value)}
+              placeholder="Ej: Clase martes, Recordatorio semanal..."
+            />
+            <span className="text-xs font-normal text-slate-500">Un nombre para reconocerlo en la lista.</span>
+          </label>
 
           <div className="grid grid-cols-2 gap-3">
             <label className="grid gap-2 text-sm font-medium text-slate-950" htmlFor="schedule-date">

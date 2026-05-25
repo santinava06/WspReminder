@@ -82,7 +82,9 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
     }
     try {
       require('qrcode-terminal').generate(qr, { small: true })
-    } catch {}
+    } catch (qrErr) {
+      console.warn(`[${session.id}] Error generando QR en terminal:`, qrErr?.message || qrErr)
+    }
   }
 
   async function startSocket() {
@@ -113,12 +115,13 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
     sock.ev.on('creds.update', saveCreds)
 
     sock.ev.on('connection.update', (update) => {
-      updateTimestamps()
-      const { connection, lastDisconnect, qr } = update
+      try {
+        updateTimestamps()
+        const { connection, lastDisconnect, qr } = update
 
-      console.log(`[${session.id}] connection.update:`, JSON.stringify({ connection, hasQr: !!qr, lastError: lastDisconnect?.error?.message }))
+        console.log(`[${session.id}] connection.update:`, JSON.stringify({ connection, hasQr: !!qr, lastError: lastDisconnect?.error?.message }))
 
-      if (qr) {
+        if (qr) {
         session.manuallyDisconnected = false
         session.isClientReady = false
         session.lastQr = qr
@@ -159,14 +162,23 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
           setTimeout(startSocket, 5000)
         }
       }
-    })
+    } catch (err) {
+      console.error(`[${session.id}] Error en connection.update:`, err?.message || err)
+    }
+  })
 
     session.client = sock
   }
 
   session.reinitializeClient = async ({ resetAttempts } = {}) => {
     if (session.manuallyDisconnected) return
-    await startSocket()
+    try {
+      await startSocket()
+    } catch (err) {
+      console.error(`[${session.id}] Error en startSocket:`, err?.message || err)
+      session.sessionStatus = 'disconnected'
+      session.lastSessionMessage = 'Error al iniciar socket: ' + (err?.message || 'desconocido')
+    }
   }
 
   session.reinitializeClient()
@@ -189,11 +201,15 @@ async function destroySession(sessionId) {
   session.scheduler.stop()
 
   if (session.client && typeof session.client.logout === 'function') {
-    try { await session.client.logout() } catch {}
+    try { await session.client.logout() } catch (err) {
+      console.warn(`[${session.id}] Error en logout durante destroy:`, err?.message || err)
+    }
   }
 
   if (session.client && typeof session.client.end === 'function') {
-    try { session.client.end() } catch {}
+    try { session.client.end() } catch (err) {
+      console.warn(`[${session.id}] Error en end durante destroy:`, err?.message || err)
+    }
   }
 
   sessions.delete(sessionId)

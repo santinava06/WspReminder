@@ -87,7 +87,10 @@ function ScheduledMessageCard({
           <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${statusTone}`}>
             {statusLabel[message.status]}
           </span>
-          <p className="mt-1.5 truncate text-sm font-medium text-slate-950">{message.message}</p>
+          {message.title && (
+            <p className="mt-1.5 truncate text-sm font-semibold text-slate-950">{message.title}</p>
+          )}
+          <p className={`${message.title ? 'mt-0.5 truncate text-xs text-slate-500' : 'mt-1.5 truncate text-sm font-medium text-slate-950'}`}>{message.message}</p>
           {message.media && (
             <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-400">
               <Image size={11} />

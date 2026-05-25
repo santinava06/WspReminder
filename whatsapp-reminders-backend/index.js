@@ -1,5 +1,7 @@
 const express = require('express')
 const cors = require('cors')
+const { existsSync, rmSync } = require('fs')
+const { join } = require('path')
 const sessionManager = require('./sessionManager')
 const { createSessionRouter, clearPersistedGroupsCache } = require('./app')
 const auth = require('./auth')
@@ -7,9 +9,13 @@ const history = require('./history')
 
 require('dotenv').config()
 
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[UNHANDLED_REJECTION]', reason instanceof Error ? reason.stack : reason)
+})
+
 const app = express()
 app.use(cors())
-app.use(express.json({ limit: '10mb' }))
+app.use(express.json({ limit: '20mb' }))
 
 const SESSION_NAMES = ['admin', 'comercial-1', 'comercial-2', 'academico-1', 'in', 'luciana']
 
@@ -169,6 +175,7 @@ app.post('/admin/disconnect/:sessionId', adminOnly, async (req, res) => {
       return res.status(404).json({ ok: false, error: 'Sesion no encontrada' })
     }
 
+    session.manuallyDisconnected = true
     session.isClientReady = false
     session.lastQr = null
     session.lastQrDataUrl = null
@@ -188,7 +195,17 @@ app.post('/admin/disconnect/:sessionId', adminOnly, async (req, res) => {
     }
 
     if (session.client && typeof session.client.end === 'function') {
-      try { session.client.end() } catch {}
+      try { session.client.end() } catch (endErr) {
+        console.warn(`[${session.id}] Error al cerrar socket:`, endErr?.message || endErr)
+      }
+    }
+
+    clearPersistedGroupsCache(session)
+    const authPath = join(session.dataDir, 'auth')
+    try {
+      if (existsSync(authPath)) rmSync(authPath, { recursive: true, force: true })
+    } catch (err) {
+      console.warn(`[${session.id}] Could not clear auth directory:`, err.message)
     }
 
     session.manuallyDisconnected = false
@@ -203,6 +220,11 @@ app.post('/admin/disconnect/:sessionId', adminOnly, async (req, res) => {
     console.error('Error al desconectar sesion:', error)
     res.status(500).json({ ok: false, error: 'No se pudo desconectar la sesion' })
   }
+})
+
+app.use((err, req, res, next) => {
+  console.error('[EXPRESS_ERROR]', req.method, req.path, err instanceof Error ? err.stack : err)
+  res.status(500).json({ ok: false, error: 'Error interno del servidor' })
 })
 
 const HOST = process.env.HOST || '0.0.0.0'

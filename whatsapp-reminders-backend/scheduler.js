@@ -116,11 +116,12 @@ class Scheduler {
     return this.messages.find(m => m.id === id) || null
   }
 
-  create({ groups, message, scheduledAt, media, username }) {
+  create({ groups, message, scheduledAt, media, username, title }) {
     const msg = {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
       groups,
       message,
+      title: title || '',
       scheduledAt: new Date(scheduledAt).toISOString(),
       status: 'pending',
       lastError: null,
@@ -225,20 +226,32 @@ class Scheduler {
     this.load()
 
     this.checkInterval = setInterval(async () => {
-      const pending = this.getPending()
-      if (pending.length === 0) return
+      try {
+        const pending = this.getPending()
+        if (pending.length === 0) return
 
-      if (!this.isClientReady(this._client)) {
-        pending.forEach((msg) => this.markWaitingForConnection(msg))
-        return
-      }
+        if (!this.isClientReady(this._client)) {
+          pending.forEach((msg) => this.markWaitingForConnection(msg))
+          return
+        }
 
-      for (const msg of pending) {
-        await this.sendScheduledMessage(this._client, msg)
+        for (const msg of pending) {
+          await this.sendScheduledMessage(this._client, msg)
+        }
+      } catch (err) {
+        console.error('[Scheduler] Error en ciclo de verificacion:', err?.message || err)
       }
     }, 10_000)
 
     console.log(`Scheduler started for ${this.dataFile} (checking every 10s)`)
+  }
+
+  async sendNow(client, id) {
+    const msg = this.messages.find(m => m.id === id)
+    if (!msg || msg.status === 'sent' || msg.status === 'cancelled' || msg.status === 'sending') return null
+    msg.scheduledAt = new Date().toISOString()
+    await this.sendScheduledMessage(client, msg)
+    return msg
   }
 
   stop() {

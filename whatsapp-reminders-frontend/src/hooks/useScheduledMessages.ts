@@ -14,6 +14,7 @@ export type MediaAttachment = {
 export type ScheduledMessage = {
   id: string
   groups: { id: string; name: string }[]
+  title?: string
   message: string
   scheduledAt: string
   status: ScheduledStatus
@@ -31,11 +32,13 @@ type ScheduledResponse = {
   error?: string
 }
 
-export default function useScheduledMessages(apiBaseUrl: string, sessionId: string) {
+export default function useScheduledMessages(apiBaseUrl: string, sessionId: string, connected?: boolean) {
   const [messages, setMessages] = useState<ScheduledMessage[]>([])
   const [loadState, setLoadState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [error, setError] = useState('')
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const connectedRef = useRef(connected)
+  connectedRef.current = connected
   const scheduledBaseUrl = `${apiBaseUrl}/sessions/${sessionId}/scheduled`
 
   const fetchScheduled = useCallback(async () => {
@@ -54,7 +57,7 @@ export default function useScheduledMessages(apiBaseUrl: string, sessionId: stri
   }, [scheduledBaseUrl])
 
   const createScheduled = useCallback(
-    async (groups: Group[], message: string, scheduledAt: string, media?: MediaAttachment) => {
+    async (groups: Group[], message: string, scheduledAt: string, media?: MediaAttachment, title?: string) => {
       const response = await apiFetch(scheduledBaseUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -63,6 +66,7 @@ export default function useScheduledMessages(apiBaseUrl: string, sessionId: stri
           message,
           scheduledAt,
           media,
+          title,
         }),
       })
       const data = (await response.json()) as ScheduledResponse & { scheduled?: ScheduledMessage }
@@ -83,7 +87,33 @@ export default function useScheduledMessages(apiBaseUrl: string, sessionId: stri
     [scheduledBaseUrl, fetchScheduled],
   )
 
+  const deleteScheduled = useCallback(
+    async (id: string) => {
+      const response = await apiFetch(`${scheduledBaseUrl}/${id}/remove`, { method: 'DELETE' })
+      const data = await response.json()
+      if (!response.ok || !data.ok) throw new Error(data.error || 'Error al eliminar')
+      await fetchScheduled()
+    },
+    [scheduledBaseUrl, fetchScheduled],
+  )
+
+  const sendScheduledNow = useCallback(
+    async (id: string) => {
+      const response = await apiFetch(`${scheduledBaseUrl}/${id}/send-now`, { method: 'POST' })
+      const data = await response.json()
+      if (!response.ok || !data.ok) throw new Error(data.error || 'Error al enviar ahora')
+      await fetchScheduled()
+      return data.scheduled
+    },
+    [scheduledBaseUrl, fetchScheduled],
+  )
+
   useEffect(() => {
+    if (!connectedRef.current) {
+      setMessages([])
+      setLoadState('idle')
+      return
+    }
     queueMicrotask(() => {
       fetchScheduled()
     })
@@ -91,7 +121,7 @@ export default function useScheduledMessages(apiBaseUrl: string, sessionId: stri
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
-  }, [fetchScheduled])
+  }, [fetchScheduled, connected])
 
   const statusLabel: Record<ScheduledStatus, string> = {
     pending: 'Pendiente',
@@ -102,5 +132,10 @@ export default function useScheduledMessages(apiBaseUrl: string, sessionId: stri
     cancelled: 'Cancelado',
   }
 
-  return { messages, loadState, error, fetchScheduled, createScheduled, cancelScheduled, statusLabel }
+  const clearMessages = useCallback(() => {
+    setMessages([])
+    setLoadState('idle')
+  }, [])
+
+  return { messages, loadState, error, fetchScheduled, createScheduled, cancelScheduled, deleteScheduled, sendScheduledNow, clearMessages, statusLabel }
 }

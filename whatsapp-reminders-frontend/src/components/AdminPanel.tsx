@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { AppSettings } from '../hooks/useSettings'
-import { apiFetch } from '../api'
+import { apiFetch, parseApiError } from '../api'
+import { useToast } from './Toast'
 
 type Props = {
   apiBaseUrl: string
@@ -86,40 +87,74 @@ export default function AdminPanel({
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [scheduled, setScheduled] = useState<ScheduledMessage[]>([])
   const [stats, setStats] = useState<Stats | null>(null)
+  const { toast } = useToast()
   const [disconnecting, setDisconnecting] = useState<string | null>(null)
   const [historyPage, setHistoryPage] = useState(0)
   const [historyDetail, setHistoryDetail] = useState<string | null>(null)
+  const [loadErrors, setLoadErrors] = useState<Record<string, string>>({})
   const pageSize = 20
 
   const fetchUsers = useCallback(async () => {
-    const res = await apiFetch(`${apiBaseUrl}/admin/users`)
-    if (res.ok) {
-      const data = await res.json()
-      setUsers(data.users || [])
+    try {
+      const res = await apiFetch(`${apiBaseUrl}/admin/users`)
+      if (res.ok) {
+        const data = await res.json()
+        setUsers(data.users || [])
+        setLoadErrors((e) => { const n = { ...e }; delete n.users; return n })
+      } else {
+        const msg = await parseApiError(res, 'Error al cargar usuarios')
+        setLoadErrors((e) => ({ ...e, users: msg }))
+      }
+    } catch (err) {
+      setLoadErrors((e) => ({ ...e, users: err instanceof Error ? err.message : 'Error de red' }))
     }
   }, [apiBaseUrl])
 
   const fetchHistory = useCallback(async () => {
-    const res = await apiFetch(`${apiBaseUrl}/admin/history`)
-    if (res.ok) {
-      const data = await res.json()
-      setHistory(data.entries || [])
+    try {
+      const res = await apiFetch(`${apiBaseUrl}/admin/history`)
+      if (res.ok) {
+        const data = await res.json()
+        setHistory(data.entries || [])
+        setLoadErrors((e) => { const n = { ...e }; delete n.history; return n })
+      } else {
+        const msg = await parseApiError(res, 'Error al cargar historial')
+        setLoadErrors((e) => ({ ...e, history: msg }))
+      }
+    } catch (err) {
+      setLoadErrors((e) => ({ ...e, history: err instanceof Error ? err.message : 'Error de red' }))
     }
   }, [apiBaseUrl])
 
   const fetchScheduled = useCallback(async () => {
-    const res = await apiFetch(`${apiBaseUrl}/admin/scheduled`)
-    if (res.ok) {
-      const data = await res.json()
-      setScheduled(data.messages || [])
+    try {
+      const res = await apiFetch(`${apiBaseUrl}/admin/scheduled`)
+      if (res.ok) {
+        const data = await res.json()
+        setScheduled(data.messages || [])
+        setLoadErrors((e) => { const n = { ...e }; delete n.scheduled; return n })
+      } else {
+        const msg = await parseApiError(res, 'Error al cargar programados')
+        setLoadErrors((e) => ({ ...e, scheduled: msg }))
+      }
+    } catch (err) {
+      setLoadErrors((e) => ({ ...e, scheduled: err instanceof Error ? err.message : 'Error de red' }))
     }
   }, [apiBaseUrl])
 
   const fetchStats = useCallback(async () => {
-    const res = await apiFetch(`${apiBaseUrl}/admin/stats`)
-    if (res.ok) {
-      const data = await res.json()
-      setStats(data.stats || null)
+    try {
+      const res = await apiFetch(`${apiBaseUrl}/admin/stats`)
+      if (res.ok) {
+        const data = await res.json()
+        setStats(data.stats || null)
+        setLoadErrors((e) => { const n = { ...e }; delete n.stats; return n })
+      } else {
+        const msg = await parseApiError(res, 'Error al cargar estadisticas')
+        setLoadErrors((e) => ({ ...e, stats: msg }))
+      }
+    } catch (err) {
+      setLoadErrors((e) => ({ ...e, stats: err instanceof Error ? err.message : 'Error de red' }))
     }
   }, [apiBaseUrl])
 
@@ -174,6 +209,11 @@ export default function AdminPanel({
         </div>
 
         <div className="scroll-area max-h-[calc(100vh-14rem)] overflow-auto p-5">
+          {loadErrors[tab] && (
+            <div className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+              {loadErrors[tab]}
+            </div>
+          )}
           {tab === 'users' && (
             <div className="grid gap-2">
               <div className="grid grid-cols-[120px_1fr_100px_80px_90px] gap-3 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-slate-500">
@@ -214,8 +254,15 @@ export default function AdminPanel({
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                           })
-                          if (res.ok) await fetchUsers()
-                        } catch {}
+                          if (res.ok) {
+                            toast(`Sesion de ${u.displayName} desconectada`, 'success')
+                            await fetchUsers()
+                          } else {
+                            toast(await parseApiError(res, 'No se pudo desconectar'), 'error')
+                          }
+                        } catch (err) {
+                          toast(err instanceof Error ? err.message : 'Error de red al desconectar', 'error')
+                        }
                         setDisconnecting(null)
                       }}
                     >

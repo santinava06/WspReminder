@@ -7,7 +7,6 @@ import type { Group } from './components/GroupList'
 import AdminPanel from './components/AdminPanel'
 import ScheduleModal from './components/ScheduleModal'
 import ScheduledMessagesModal from './components/ScheduledMessagesModal'
-import ScheduledPanel from './components/ScheduledPanel'
 import SendConfirmationModal from './components/SendConfirmationModal'
 import Titlebar from './components/Titlebar'
 import useDebouncedValue from './hooks/useDebouncedValue'
@@ -18,6 +17,7 @@ import type { MediaAttachment } from './hooks/useScheduledMessages'
 import useScheduledMessages from './hooks/useScheduledMessages'
 import useSettings from './hooks/useSettings'
 import { apiFetch, getToken, getStoredSessionId } from './api'
+import { useToast } from './components/Toast'
 import LoginPage from './components/LoginPage'
 
 type StatusResponse = {
@@ -303,28 +303,74 @@ function App() {
   const sessions = useMemo<SessionSummary[]>(() => [{ id: sessionId, status: '', ready: false, qrAvailable: false, createdAt: '', updatedAt: '' }], [sessionId])
   const selectedSessionId = sessionId
 
-  const handleFileSelect = useCallback((file: File | null) => {
+  const compressImage = useCallback((file: File): Promise<{ dataUrl: string; blob: Blob; data: string; size: number }> => {
+    return new Promise((resolve, reject) => {
+      const img = document.createElement('img')
+      const url = URL.createObjectURL(file)
+      img.onload = () => {
+        URL.revokeObjectURL(url)
+        let w = img.naturalWidth
+        let h = img.naturalHeight
+        const MAX = 1200
+        if (w > MAX || h > MAX) {
+          if (w > h) { h = Math.round(h * MAX / w); w = MAX }
+          else { w = Math.round(w * MAX / h); h = MAX }
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')!
+        ctx.drawImage(img, 0, 0, w, h)
+        canvas.toBlob((blob) => {
+          if (!blob) { reject(new Error('No se pudo comprimir la imagen')); return }
+          const reader = new FileReader()
+          reader.onload = (e) => {
+            const dataUrl = e.target?.result as string
+            const parts = dataUrl.split(',')
+            resolve({ dataUrl, blob, data: parts[1] || '', size: blob.size })
+          }
+          reader.onerror = () => reject(new Error('Error al leer imagen comprimida'))
+          reader.readAsDataURL(blob)
+        }, 'image/jpeg', 0.8)
+      }
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se pudo cargar la imagen')) }
+      img.src = url
+    })
+  }, [])
+
+  const handleFileSelect = useCallback(async (file: File | null) => {
     setSelectedFile(file)
     if (!file) {
       setImagePreview(null)
       setMediaAttachment(null)
       return
     }
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const dataUrl = e.target?.result as string
-      setImagePreview(dataUrl)
-      const parts = dataUrl.split(',')
-      const mimeMatch = parts[0].match(/:(.*?);/)
+    try {
+      const compressed = await compressImage(file)
+      setImagePreview(compressed.dataUrl)
       setMediaAttachment({
-        mimetype: mimeMatch ? mimeMatch[1] : 'image/jpeg',
-        data: parts[1] || '',
+        mimetype: 'image/jpeg',
+        data: compressed.data,
         filename: file.name,
-        filesize: file.size,
+        filesize: compressed.size,
       })
+    } catch {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        const dataUrl = e.target?.result as string
+        setImagePreview(dataUrl)
+        const parts = dataUrl.split(',')
+        const mimeMatch = parts[0].match(/:(.*?);/)
+        setMediaAttachment({
+          mimetype: mimeMatch ? mimeMatch[1] : 'image/jpeg',
+          data: parts[1] || '',
+          filename: file.name,
+          filesize: file.size,
+        })
+      }
+      reader.readAsDataURL(file)
     }
-    reader.readAsDataURL(file)
-  }, [])
+  }, [compressImage])
 
   const [sendState, setSendState] = useState<LoadState>('idle')
   const [sendFeedback, setSendFeedback] = useState('')
@@ -336,17 +382,30 @@ function App() {
   const [isScheduledOpen, setIsScheduledOpen] = useState(false)
   const [isHistoryOpen, setIsHistoryOpen] = useState(false)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
+  const [pendingOpenSchedule, setPendingOpenSchedule] = useState(false)
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingSendConfirmation | null>(null)
   const cancelSendRef = useRef(false)
+  const { toast } = useToast()
 
+  const sessionConnected = Boolean(status?.ready)
   const {
     messages: scheduledMessages,
     loadState: scheduledLoadState,
     createScheduled,
     cancelScheduled,
+    deleteScheduled,
+    sendScheduledNow,
+    clearMessages,
     statusLabel,
-  } = useScheduledMessages(apiBaseUrl, selectedSessionId)
+  } = useScheduledMessages(apiBaseUrl, selectedSessionId, sessionConnected)
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
+
+  useEffect(() => {
+    if (pendingOpenSchedule) {
+      setPendingOpenSchedule(false)
+      setIsScheduleOpen(true)
+    }
+  }, [pendingOpenSchedule])
 
   const selectedSession = sessions[0] ?? null
   const sessionBaseUrl = `${apiBaseUrl}/sessions/${selectedSessionId}`
@@ -420,7 +479,6 @@ function App() {
   const progressDone = sendResults.filter((result) => result.ok || result.error).length
   const progressTotal = sendResults.length
   const progressPercent = progressTotal > 0 ? Math.round((progressDone / progressTotal) * 100) : 0
-  const lastHistoryItem = sendHistory[0]
   const qrDataUrl = status?.qr?.available ? status.qr.dataUrl : null
   const connectionStatus = useMemo(
     () => getConnectionStatus({ status, statusState, groupState, groupsRefreshing }),
@@ -874,7 +932,9 @@ function App() {
   }
 
   const [disconnectState, setDisconnectState] = useState<LoadState>('idle')
+  const [disconnectError, setDisconnectError] = useState('')
   const [pendingDisconnect, setPendingDisconnect] = useState(false)
+  const intentionalDisconnect = useRef(false)
 
   const requestDisconnect = () => {
     setPendingDisconnect(true)
@@ -910,11 +970,15 @@ function App() {
     setSelectedFile(null)
     setImagePreview(null)
     setMediaAttachment(null)
+    clearMessages()
   }
 
   const confirmDisconnect = async () => {
+    intentionalDisconnect.current = true
+    sessionStorage.removeItem(DISCONNECT_RELOAD_KEY)
     setPendingDisconnect(false)
     setDisconnectState('loading')
+    setDisconnectError('')
 
     try {
       const response = await apiFetch(`${sessionBaseUrl}/disconnect`, {
@@ -931,7 +995,9 @@ function App() {
       resetAfterDisconnect()
       await fetchStatus()
     } catch (error) {
-      console.error('Error al desconectar:', error)
+      const msg = error instanceof Error ? error.message : 'Error al desconectar'
+      console.error('Error al desconectar:', msg)
+      setDisconnectError(msg)
       setDisconnectState('error')
     }
   }
@@ -950,7 +1016,10 @@ function App() {
   }, [fetchStatus])
 
   useEffect(() => {
+    if (intentionalDisconnect.current) return
+
     if (status?.status === 'ready') {
+      intentionalDisconnect.current = false
       sessionStorage.removeItem(DISCONNECT_RELOAD_KEY)
       return
     }
@@ -1069,9 +1138,14 @@ function App() {
               <span>Admin</span>
             </button>
           )}
-          <button className={ghostButton} type="button" onClick={() => setIsScheduledOpen(true)}>
+          <button className={secondaryButton} type="button" onClick={() => setIsScheduledOpen(true)}>
             <Calendar size={16} />
             <span>Programados</span>
+            {scheduledMessages.filter(m => m.status === 'pending' || m.status === 'waiting_connection').length > 0 && (
+              <span className="ml-1 rounded-full bg-amber-500 px-1.5 py-0.5 text-[11px] font-bold text-white leading-none">
+                {scheduledMessages.filter(m => m.status === 'pending' || m.status === 'waiting_connection').length}
+              </span>
+            )}
           </button>
         </div>
       </header>
@@ -1124,6 +1198,9 @@ function App() {
                     {disconnectState === 'loading' ? 'Desconectando...' : 'Desconectar'}
                   </button>
                 </div>
+                {disconnectError && (
+                  <p className="mt-2 text-xs text-rose-600">{disconnectError}</p>
+                )}
               </div>
             ) : (
               isReady && <p className="mt-3 text-sm text-slate-600">{statusDetail}</p>
@@ -1224,34 +1301,42 @@ function App() {
             </div>
           </section>}
 
-          <section className={`${sidebarPanelClass} p-4`}>
-            <div className="flex items-center justify-between gap-3">
+          <section className={`${sidebarPanelClass} flex min-h-0 flex-1 flex-col p-0`}>
+            <div className="flex items-center justify-between gap-3 px-4 py-3">
               {!settings.sidebarCollapsed && <h2 className="section-title">Historial</h2>}
               <button className="ui-btn ui-btn-ghost min-h-8 px-2 text-xs" type="button" onClick={() => setIsHistoryOpen(true)}>
                 {settings.sidebarCollapsed ? <History size={16} /> : 'Ver todo'}
               </button>
             </div>
-            {!settings.sidebarCollapsed && (lastHistoryItem ? (
-              <button className="surface-card pressable mt-3 w-full p-3 text-left transition hover:bg-slate-100" type="button" onClick={() => setIsHistoryOpen(true)}>
-                <span className="block text-xs font-medium text-slate-500">{formatDate(lastHistoryItem.createdAt)}</span>
-                <span className="mt-1 block truncate text-sm font-semibold text-slate-950">{lastHistoryItem.message}</span>
-                <span className="mt-2 block text-xs text-slate-500">{lastHistoryItem.sent}/{lastHistoryItem.total} enviados</span>
-              </button>
-            ) : (
-              <p className="surface-card mt-3 border-dashed px-3 py-3 text-sm text-slate-500">Todavia no hay envios.</p>
-            ))}
+            {!settings.sidebarCollapsed && (
+              <div className="scroll-area min-h-0 flex-1 overflow-auto px-4 pb-4">
+                {sendHistory.length === 0 ? (
+                  <p className="surface-card mt-1 border-dashed px-3 py-3 text-sm text-slate-500">Todavia no hay envios.</p>
+                ) : (
+                  <div className="grid gap-2">
+                    {sendHistory.slice(0, 10).map((h) => (
+                      <button
+                        key={h.id}
+                        className="surface-card pressable w-full p-3 text-left transition hover:bg-slate-100"
+                        type="button"
+                        onClick={() => { setOpenHistoryId(h.id); setIsHistoryOpen(true) }}
+                      >
+                        <span className="block text-xs font-medium text-slate-500">{formatDate(h.createdAt)}</span>
+                        <span className="mt-1 block truncate text-sm font-semibold text-slate-950">{h.message}</span>
+                        <span className="mt-1 block text-xs text-slate-500">{h.sent}/{h.total} enviados{h.failed > 0 ? `, ${h.failed} fallidos` : ''}</span>
+                      </button>
+                    ))}
+                    {sendHistory.length > 10 && (
+                      <button className="ui-btn ui-btn-ghost w-full text-xs" type="button" onClick={() => setIsHistoryOpen(true)}>
+                        Ver los {sendHistory.length - 10} restantes
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </section>
 
-          {!settings.sidebarCollapsed && (
-            <ScheduledPanel
-              formatDate={formatDate}
-              loadState={scheduledLoadState}
-              messages={scheduledMessages}
-              onCancel={cancelScheduled}
-              panelClass={sidebarPanelClass}
-              statusLabel={statusLabel}
-            />
-          )}
         </aside>
 
         <section className={`${panelClass} grid min-h-[36rem] grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-4 overflow-hidden p-0`}>
@@ -1573,11 +1658,17 @@ function App() {
           <div className="border-t !border-slate-200/70 bg-white/85 px-5 py-4 backdrop-blur-xl">
             <div className="grid gap-2">
               <div className="grid grid-cols-2 gap-2">
-                <button className={secondaryButton} type="button" disabled={!canSend} onClick={() => setIsScheduleOpen(true)}>
+                <button className={secondaryButton} type="button" disabled={!message.trim() && !mediaAttachment || sendState === 'loading'} onClick={() => {
+                  if (!sessionConnected) { toast('Escanea el codigo QR para conectar WhatsApp antes de programar un envio', 'error'); return }
+                  setIsScheduleOpen(true)
+                }}>
                   <Calendar size={14} />
                   <span className="ml-1.5">Programar</span>
                 </button>
-                <button className={primaryButton} type="button" disabled={!canSend} onClick={requestSend}>
+                <button className={primaryButton} type="button" disabled={!canSend && sessionConnected} onClick={() => {
+                  if (!sessionConnected) { toast('Escanea el codigo QR para conectar WhatsApp antes de enviar', 'error'); return }
+                  requestSend()
+                }}>
                   {sendState === 'loading' ? 'Enviando...' : `Enviar${destinationCount > 0 ? ` a ${destinationCount}` : ''}`}
                 </button>
               </div>
@@ -1763,7 +1854,17 @@ function App() {
         loadState={scheduledLoadState}
         messages={scheduledMessages}
         onCancel={cancelScheduled}
+        onDelete={deleteScheduled}
+        onSendNow={sendScheduledNow}
         onClose={() => setIsScheduledOpen(false)}
+        onCreateClick={() => {
+          setIsScheduledOpen(false)
+          if (!sessionConnected) {
+            toast('Escanea el codigo QR para conectar WhatsApp antes de programar un envio', 'error')
+          } else {
+            setPendingOpenSchedule(true)
+          }
+        }}
         statusLabel={statusLabel}
       />
     )}

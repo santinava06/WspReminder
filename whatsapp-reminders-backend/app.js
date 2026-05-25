@@ -1,5 +1,5 @@
 const express = require('express')
-const { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, copyFileSync } = require('fs')
+const { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, copyFileSync, rmSync } = require('fs')
 const { join, resolve } = require('path')
 const history = require('./history')
 
@@ -446,6 +446,17 @@ const createSessionRouter = () => {
     res.json({ ok: true, available: true, qr: session.lastQr, dataUrl: session.lastQrDataUrl })
   })
 
+  function clearSessionAuth(session) {
+    const authPath = join(session.dataDir, 'auth')
+    try {
+      if (existsSync(authPath)) {
+        rmSync(authPath, { recursive: true, force: true })
+      }
+    } catch (err) {
+      console.warn(`[${session.id}] Could not clear auth directory:`, err.message)
+    }
+  }
+
   router.post('/disconnect', async (req, res) => {
     try {
       const session = req.session
@@ -454,6 +465,7 @@ const createSessionRouter = () => {
         return res.status(400).json({ ok: false, error: 'No hay ninguna sesion activa para desconectar' })
       }
 
+      session.manuallyDisconnected = true
       session.isClientReady = false
       session.lastQr = null
       session.lastQrDataUrl = null
@@ -473,9 +485,12 @@ const createSessionRouter = () => {
       }
 
       if (session.client && typeof session.client.end === 'function') {
-        try { session.client.end() } catch {}
+        try { session.client.end() } catch (endErr) {
+          console.warn('Error al cerrar socket:', endErr?.message || endErr)
+        }
       }
 
+      clearSessionAuth(session)
       session.manuallyDisconnected = false
       session.reinitializeClient()
 
@@ -501,7 +516,7 @@ const createSessionRouter = () => {
         return res.status(400).json({ ok: false, error: 'Faltan groups, message o scheduledAt' })
       }
 
-      const scheduled = session.scheduler.create({ groups, message, scheduledAt, media, username: req.username || session.id })
+      const scheduled = session.scheduler.create({ groups, message, title: req.body.title, scheduledAt, media, username: req.username || session.id })
       res.status(201).json({ ok: true, message: 'Mensaje programado', scheduled })
     } catch (error) {
       console.error('Error programando mensaje:', error)
@@ -515,6 +530,38 @@ const createSessionRouter = () => {
       return res.status(404).json({ ok: false, error: 'Mensaje no encontrado o ya fue enviado' })
     }
     res.json({ ok: true, message: 'Mensaje cancelado', scheduled: msg })
+  })
+
+  router.post('/scheduled/:id/send-now', async (req, res) => {
+    try {
+      const session = req.session
+      if (!(await ensureWhatsappReady(session, res))) return
+
+      const msg = await session.scheduler.sendNow(session.client, req.params.id)
+      if (!msg) {
+        return res.status(400).json({ ok: false, error: 'Mensaje no encontrado o ya fue enviado' })
+      }
+
+      history.logSend(req.username || session.id, req.username || session.id, {
+        message: msg.message,
+        results: msg.results,
+        hasMedia: !!msg.media,
+        mode: 'send-now',
+      })
+
+      res.json({ ok: true, message: 'Mensaje enviado', scheduled: msg })
+    } catch (error) {
+      console.error('Error enviando ahora:', error)
+      res.status(500).json({ ok: false, error: 'No se pudo enviar el mensaje' })
+    }
+  })
+
+  router.delete('/scheduled/:id/remove', (req, res) => {
+    const removed = req.session.scheduler.remove(req.params.id)
+    if (!removed) {
+      return res.status(404).json({ ok: false, error: 'Mensaje no encontrado' })
+    }
+    res.json({ ok: true, message: 'Mensaje eliminado' })
   })
 
   return router

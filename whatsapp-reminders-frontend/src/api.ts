@@ -32,3 +32,17 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   }
   return response
 }
+
+export async function parseApiError(response: Response, fallback?: string): Promise<string> {
+  try {
+    if (!response.ok) {
+      const data = await response.json()
+      if (data && typeof data.error === 'string') return data.error
+    }
+  } catch {}
+  return fallback || `Error del servidor (${response.status})`
+}
+
+export function getApiBaseUrl(): string {
+  return import.meta.env.VITE_API_BASE_URL || 'http://localhost:3177'
+}
