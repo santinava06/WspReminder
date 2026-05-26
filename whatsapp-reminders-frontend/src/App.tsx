@@ -275,7 +275,6 @@ function App() {
   } = useSettings()
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [statusState, setStatusState] = useState<LoadState>('idle')
-  const [_statusError, _setStatusError] = useState('')
   const [query, setQuery] = useState('')
   const debouncedQuery = useDebouncedValue(query, 140)
   const [selectionView, setSelectionView] = useState<SelectionView>('all')
@@ -301,7 +300,6 @@ function App() {
   const displayName = useMemo(() => localStorage.getItem('display_name') || sessionId, [sessionId])
   const username = useMemo(() => localStorage.getItem('username') || '', [authenticated])
   const isAdmin = username === 'admin'
-  const sessions = useMemo<SessionSummary[]>(() => [{ id: sessionId, status: '', ready: false, qrAvailable: false, createdAt: '', updatedAt: '' }], [sessionId])
   const selectedSessionId = sessionId
 
   const compressImage = useCallback((file: File): Promise<{ dataUrl: string; blob: Blob; data: string; size: number }> => {
@@ -412,7 +410,6 @@ function App() {
     }
   }, [pendingOpenSchedule])
 
-  const _selectedSession = sessions[0] ?? null
   const sessionBaseUrl = `${apiBaseUrl}/sessions/${selectedSessionId}`
   const isReady = Boolean(status?.ready)
 
@@ -502,8 +499,6 @@ function App() {
     const controller = new AbortController()
     statusAbortRef.current = controller
     setStatusState('loading')
-    setStatusError('')
-
     const url = `${apiBaseUrl}/sessions/${selectedSessionId}/status`
 
     try {
@@ -521,7 +516,6 @@ function App() {
       if (isAbortError(error)) return null
       setStatus(null)
       setStatusState('error')
-      setStatusError(error instanceof Error ? error.message : 'No se pudo consultar el estado')
       return null
     }
   }, [apiBaseUrl, selectedSessionId])
@@ -968,7 +962,6 @@ function App() {
       qr: { available: false, dataUrl: null },
     })
     setStatusState('success')
-    setStatusError('')
     setGroupState('idle')
     setGroupError('')
     setGroupsRefreshing(false)

@@ -42,7 +42,6 @@ type Props = {
 
 const primaryButton = 'inline-flex items-center justify-center gap-1.5 min-h-9 rounded-lg bg-slate-950 px-4 text-sm font-medium text-white transition hover:bg-slate-800 active:scale-[0.98] pressable disabled:opacity-40 disabled:cursor-not-allowed'
 const secondaryButton = 'inline-flex items-center justify-center gap-1.5 min-h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 hover:border-slate-300 active:scale-[0.98] pressable disabled:opacity-40 disabled:cursor-not-allowed'
-const _ghostButton = 'inline-flex items-center gap-1.5 min-h-9 rounded-lg px-3 text-sm font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 active:scale-[0.98] pressable'
 const dangerButton = 'inline-flex items-center justify-center gap-1.5 min-h-9 rounded-lg border border-rose-200 bg-white px-3 text-sm font-medium text-rose-700 transition hover:bg-rose-50 active:scale-[0.98] pressable disabled:opacity-40 disabled:cursor-not-allowed'
 const panelClass = 'rounded-2xl border border-slate-100/80 bg-white/70 shadow-[0_1px_3px_-1px_rgba(0,0,0,0.04)] backdrop-blur-xl'
 
