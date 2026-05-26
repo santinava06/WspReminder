@@ -275,7 +275,7 @@ function App() {
   } = useSettings()
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [statusState, setStatusState] = useState<LoadState>('idle')
-  const [statusError, setStatusError] = useState('')
+  const [_statusError, _setStatusError] = useState('')
   const [query, setQuery] = useState('')
   const debouncedQuery = useDebouncedValue(query, 140)
   const [selectionView, setSelectionView] = useState<SelectionView>('all')
@@ -412,7 +412,7 @@ function App() {
     }
   }, [pendingOpenSchedule])
 
-  const selectedSession = sessions[0] ?? null
+  const _selectedSession = sessions[0] ?? null
   const sessionBaseUrl = `${apiBaseUrl}/sessions/${selectedSessionId}`
   const isReady = Boolean(status?.ready)
 
