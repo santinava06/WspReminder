@@ -70,6 +70,11 @@ function createBridgeClient(bridgeUrl = BASE_URL) {
       await bridgeFetch('/disconnect', { method: 'POST' })
     },
 
+    async requestPairingCode(phone) {
+      const data = await bridgeFetch('/pair', { method: 'POST', body: JSON.stringify({ phone }) })
+      return data
+    },
+
     end() { stopPolling() },
   }
 

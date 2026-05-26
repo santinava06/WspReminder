@@ -423,6 +423,20 @@ const createSessionRouter = () => {
     }
   }
 
+  router.post('/pair', async (req, res) => {
+    try {
+      const { phone } = req.body
+      if (!phone || !phone.match(/^\d{7,15}$/)) {
+        return res.status(400).json({ ok: false, error: 'Numero invalido. Ingresa solo digitos (ej: 541161234567)' })
+      }
+      const data = await req.session.client.requestPairingCode(phone)
+      res.json(data)
+    } catch (err) {
+      logger.error({ err: err.message }, 'Error pairing')
+      res.status(500).json({ ok: false, error: err.message })
+    }
+  })
+
   router.post('/disconnect', async (req, res) => {
     try {
       const session = req.session
