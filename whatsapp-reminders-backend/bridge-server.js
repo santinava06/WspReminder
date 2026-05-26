@@ -197,6 +197,30 @@ app.get('/qr', (req, res) => {
   res.json({ ok: true, qr: lastQr, dataUrl: lastQrDataUrl })
 })
 
+app.post('/pair', async (req, res) => {
+  try {
+    const { phone } = req.body
+    const normalizedPhone = String(phone || '').replace(/\D/g, '')
+    if (!normalizedPhone.match(/^\d{7,15}$/)) {
+      return res.status(400).json({ ok: false, error: 'Numero invalido. Ingresa solo digitos (ej: 541161234567)' })
+    }
+    if (isClientReady || client?.user) {
+      return res.status(400).json({ ok: false, error: 'WhatsApp ya esta conectado para esta sesion' })
+    }
+    if (!client || typeof client.requestPairingCode !== 'function') {
+      return res.status(503).json({ ok: false, error: 'Bridge no esta en estado de vinculacion' })
+    }
+    sessionStatus = 'pairing'
+    lastSessionMessage = 'Codigo de vinculacion solicitado. Ingresa el codigo en WhatsApp.'
+    const code = await client.requestPairingCode(normalizedPhone)
+    const formattedCode = typeof code === 'string' ? code.match(/.{1,4}/g)?.join('-') || code : String(code)
+    res.json({ ok: true, code: formattedCode })
+  } catch (err) {
+    logger.error({ err: err.message }, 'Error requesting pairing code')
+    res.status(500).json({ ok: false, error: err.message })
+  }
+})
+
 app.post('/send', async (req, res) => {
   try {
     if (!isClientReady || !client) {

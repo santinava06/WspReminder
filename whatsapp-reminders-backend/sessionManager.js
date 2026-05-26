@@ -23,8 +23,16 @@ const BRIDGE_POLL_INTERVAL_MS = 5_000
 const sessions = new Map()
 
 function getBridgeUrlForSession(sessionId) {
-  const envKey = `BRIDGE_URL_${sessionId.toUpperCase().replace(/-/g, '_')}`
-  return process.env[envKey] || process.env.BRIDGE_URL || null
+  const normalized = sessionId.replace(/-/g, '_')
+  const envKeys = [
+    `BRIDGE_URL_${normalized.toUpperCase()}`,
+    `BRIDGE_URL_${normalized}`,
+    `BRIDGE_URL_${sessionId}`,
+  ]
+  for (const envKey of envKeys) {
+    if (process.env[envKey]) return process.env[envKey]
+  }
+  return process.env.BRIDGE_URL || null
 }
 
 function getSessionDataDir(sessionId) {

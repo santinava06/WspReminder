@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, FormEvent } from 'react'
-import { Bell, Calendar, Command as CommandIcon, History, Image, PanelLeftClose, PanelLeftOpen, RefreshCw, Send, SunMoon } from 'lucide-react'
+import { Bell, Calendar, Command as CommandIcon, History, Image, KeyRound, PanelLeftClose, PanelLeftOpen, RefreshCw, Send, SunMoon } from 'lucide-react'
 import CommandPalette from './components/CommandPalette'
 import GroupList from './components/GroupList'
 import type { Group } from './components/GroupList'
@@ -54,6 +54,12 @@ type GroupsResponse = {
 type SendResponse = {
   ok: boolean
   message?: string
+  error?: string
+}
+
+type PairingResponse = {
+  ok: boolean
+  code?: string
   error?: string
 }
 
@@ -265,6 +271,10 @@ function App() {
   } = useSettings()
   const [status, setStatus] = useState<StatusResponse | null>(null)
   const [statusState, setStatusState] = useState<LoadState>('idle')
+  const [pairingPhone, setPairingPhone] = useState('')
+  const [pairingCode, setPairingCode] = useState('')
+  const [pairingState, setPairingState] = useState<LoadState>('idle')
+  const [pairingError, setPairingError] = useState('')
   const [query, setQuery] = useState('')
   const debouncedQuery = useDebouncedValue(query, 140)
   const [selectionView, setSelectionView] = useState<SelectionView>('all')
@@ -472,6 +482,7 @@ function App() {
   const progressTotal = sendResults.length
   const progressPercent = progressTotal > 0 ? Math.round((progressDone / progressTotal) * 100) : 0
   const qrDataUrl = status?.qr?.available ? status.qr.dataUrl : null
+  const showLinkingPanel = !sessionConnected && (Boolean(qrDataUrl) || ['qr', 'pairing', 'starting', 'connecting', 'disconnected'].includes(status?.status || ''))
   const connectionStatus = useMemo(
     () => getConnectionStatus({ status, statusState, groupState, groupsRefreshing }),
     [groupState, groupsRefreshing, status, statusState],
@@ -592,6 +603,43 @@ function App() {
       setGroupError('')
     }
   }, [fetchStatus, loadGroups])
+
+  const requestPairingCode = useCallback(async () => {
+    const phone = pairingPhone.replace(/\D/g, '')
+    if (!phone.match(/^\d{7,15}$/)) {
+      setPairingError('Ingresa el telefono con codigo de pais, solo numeros.')
+      setPairingCode('')
+      setPairingState('error')
+      return
+    }
+
+    setPairingState('loading')
+    setPairingError('')
+    setPairingCode('')
+
+    try {
+      const response = await apiFetch(`${sessionBaseUrl}/pair`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone }),
+      })
+      const data = (await response.json()) as PairingResponse
+
+      if (!response.ok || !data.ok || !data.code) {
+        throw new Error(data.error || `HTTP ${response.status}`)
+      }
+
+      setPairingCode(data.code)
+      setPairingState('success')
+      toast('Codigo de vinculacion generado', 'success')
+      await fetchStatus()
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'No se pudo generar el codigo'
+      setPairingError(msg)
+      setPairingState('error')
+      toast(msg, 'error')
+    }
+  }, [fetchStatus, pairingPhone, sessionBaseUrl, toast])
 
   const filterGroups = (event: FormEvent) => {
     event.preventDefault()
@@ -967,6 +1015,9 @@ function App() {
     setSendFeedback('')
     setSendState('idle')
     setPendingConfirmation(null)
+    setPairingCode('')
+    setPairingError('')
+    setPairingState('idle')
     setSelectedFile(null)
     setImagePreview(null)
     setMediaAttachment(null)
@@ -1475,11 +1526,61 @@ function App() {
           </div>
 
           <div className="scroll-area min-h-0 overflow-auto px-5 py-4">
-            {qrDataUrl && (
+            {showLinkingPanel && (
               <section className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-                <img className="mx-auto h-44 w-44 rounded-lg bg-white p-2 shadow-sm" src={qrDataUrl} alt="QR de WhatsApp para iniciar sesion" />
-                <h3 className="mt-3 text-sm font-semibold text-slate-950">Vincular WhatsApp</h3>
-                <p className="mt-1 text-sm text-slate-600">Escanea el codigo desde dispositivos vinculados.</p>
+                <h3 className="text-sm font-semibold text-slate-950">Vincular WhatsApp</h3>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  Escanea el QR o genera un codigo para vincular desde el telefono.
+                </p>
+
+                <div className="mt-4 grid gap-3">
+                  <div className="rounded-lg border border-emerald-200 bg-white p-3">
+                    {qrDataUrl ? (
+                      <img className="mx-auto h-44 w-44 rounded-lg bg-white p-2 shadow-sm" src={qrDataUrl} alt="QR de WhatsApp para iniciar sesion" />
+                    ) : (
+                      <div className="mx-auto grid h-44 w-44 place-items-center rounded-lg bg-slate-50 text-emerald-700 shadow-sm">
+                        <KeyRound size={42} />
+                      </div>
+                    )}
+                    <p className="mt-2 text-center text-xs font-medium text-slate-500">QR para dispositivos vinculados</p>
+                  </div>
+
+                  <div className="rounded-lg border border-emerald-200 bg-white p-3">
+                    <label className="grid gap-1.5 text-xs font-semibold text-slate-700" htmlFor="pairing-phone">
+                      Telefono con codigo de pais
+                      <input
+                        className="ui-field min-h-10 px-3 text-sm"
+                        id="pairing-phone"
+                        inputMode="numeric"
+                        placeholder="5493816367658"
+                        type="tel"
+                        value={pairingPhone}
+                        onChange={(event) => {
+                          setPairingPhone(event.target.value)
+                          setPairingError('')
+                        }}
+                      />
+                    </label>
+                    <button
+                      className={`${secondaryButton} mt-3 w-full`}
+                      type="button"
+                      disabled={pairingState === 'loading'}
+                      onClick={requestPairingCode}
+                    >
+                      <KeyRound size={14} />
+                      <span>{pairingState === 'loading' ? 'Generando...' : 'Generar codigo'}</span>
+                    </button>
+                    {pairingCode && (
+                      <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-center">
+                        <p className="text-xs font-semibold text-emerald-700">Codigo de vinculacion</p>
+                        <p className="mt-1 select-all break-words font-mono text-2xl font-bold tracking-[0.16em] text-slate-950">{pairingCode}</p>
+                      </div>
+                    )}
+                    {pairingError && (
+                      <p className="mt-2 text-sm font-medium text-rose-700">{pairingError}</p>
+                    )}
+                  </div>
+                </div>
               </section>
             )}
 

@@ -78,6 +78,18 @@ const clearPersistedGroupsCache = (session) => {
   }
 }
 
+function formatPairingCode(code) {
+  const value = typeof code === 'string' ? code : String(code || '')
+  return value.includes('-') ? value : value.match(/.{1,4}/g)?.join('-') || value
+}
+
+function normalizePairingResponse(result) {
+  if (result && typeof result === 'object' && 'code' in result) {
+    return { ok: result.ok !== false, code: formatPairingCode(result.code) }
+  }
+  return { ok: true, code: formatPairingCode(result) }
+}
+
 const initializeSessionGroupsCache = (session) => {
   if (session.cachedGroupsAt !== null) return
   const persisted = readPersistedGroupsCache(session)
@@ -426,11 +438,18 @@ const createSessionRouter = () => {
   router.post('/pair', async (req, res) => {
     try {
       const { phone } = req.body
-      if (!phone || !phone.match(/^\d{7,15}$/)) {
+      const normalizedPhone = String(phone || '').replace(/\D/g, '')
+      if (!normalizedPhone.match(/^\d{7,15}$/)) {
         return res.status(400).json({ ok: false, error: 'Numero invalido. Ingresa solo digitos (ej: 541161234567)' })
       }
-      const data = await req.session.client.requestPairingCode(phone)
-      res.json(data)
+      if (req.session.isClientReady || req.session.client?.user) {
+        return res.status(400).json({ ok: false, error: 'WhatsApp ya esta conectado para esta sesion' })
+      }
+      if (!req.session.client || typeof req.session.client.requestPairingCode !== 'function') {
+        return res.status(503).json({ ok: false, error: 'La sesion todavia no esta lista para pedir codigo de vinculacion' })
+      }
+      const data = await req.session.client.requestPairingCode(normalizedPhone)
+      res.json(normalizePairingResponse(data))
     } catch (err) {
       logger.error({ err: err.message }, 'Error pairing')
       res.status(500).json({ ok: false, error: err.message })
