@@ -3,6 +3,10 @@ const { homedir } = require('os')
 const { existsSync, mkdirSync } = require('fs')
 const { makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys')
 const { createScheduler } = require('./scheduler')
+const { createBridgeClient } = require('./bridgeClient')
+const logger = require('./logger')
+const auth = require('./auth')
+const { formatUptime, fetchWithTimeout } = require('./shared/utils')
 
 const DEFAULT_BASE_DATA_DIR = process.env.WHATSAPP_REMINDERS_DATA_DIR || (() => {
   if (process.platform === 'win32') {
@@ -11,8 +15,17 @@ const DEFAULT_BASE_DATA_DIR = process.env.WHATSAPP_REMINDERS_DATA_DIR || (() => 
   return join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'whatsapp-reminders')
 })()
 const DEFAULT_SESSION_ID = 'default'
+const HEALTH_CHECK_INTERVAL_MS = 45_000
+const MAX_RECONNECT_DELAY_MS = 60_000
+const INITIAL_RECONNECT_DELAY_MS = 1_000
+const BRIDGE_POLL_INTERVAL_MS = 5_000
 
 const sessions = new Map()
+
+function getBridgeUrlForSession(sessionId) {
+  const envKey = `BRIDGE_URL_${sessionId.toUpperCase().replace(/-/g, '_')}`
+  return process.env[envKey] || process.env.BRIDGE_URL || null
+}
 
 function getSessionDataDir(sessionId) {
   const sessionDir = join(DEFAULT_BASE_DATA_DIR, 'sessions', sessionId)
@@ -26,6 +39,37 @@ function isSessionRunning(session) {
   return Boolean(session.client && session.isClientReady)
 }
 
+const WEBHOOK_DISCONNECT_URL = process.env.WEBHOOK_DISCONNECT_URL || null
+
+async function notifyDisconnectWebhook(sessionId, statusCode, reason, reconnectAttempts) {
+  if (!WEBHOOK_DISCONNECT_URL) return
+  try {
+    const user = auth.getUserBySessionId(sessionId)
+    const payload = {
+      event: 'session.disconnected',
+      sessionId,
+      displayName: user?.displayName || sessionId,
+      username: user?.username || sessionId,
+      statusCode,
+      reason: reason || 'unknown',
+      reconnectAttempts,
+      timestamp: new Date().toISOString(),
+      environment: process.env.RENDER ? 'render' : 'local',
+    }
+    const res = await fetchWithTimeout(WEBHOOK_DISCONNECT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      timeout: 10_000,
+    })
+    if (!res.ok) {
+      logger.warn({ sessionId, webhookStatus: res.status }, 'Webhook respondio con error')
+    }
+  } catch (err) {
+    logger.warn({ sessionId, err: err.message }, 'Error al enviar webhook de desconexion')
+  }
+}
+
 function sessionSummary(session) {
   return {
     id: session.id,
@@ -35,6 +79,11 @@ function sessionSummary(session) {
     qrAvailable: Boolean(session.lastQrDataUrl),
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
+    connectedAt: session.connectedAt || null,
+    disconnectedAt: session.disconnectedAt || null,
+    uptime: formatUptime(session.connectedAt),
+    reconnectAttempts: session.reconnectAttempts || 0,
+    healthCheckRunning: Boolean(session._healthInterval),
   }
 }
 
@@ -44,7 +93,7 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
   }
 
   const sessionDataDir = getSessionDataDir(sessionId)
-  const scheduler = createScheduler({ dataDir: sessionDataDir, onSendScheduled })
+  const scheduler = createScheduler({ dataDir: sessionDataDir, sessionId, onSendScheduled })
 
   const session = {
     id: sessionId,
@@ -64,6 +113,11 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
     groupsCachePersistence: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    connectedAt: null,
+    disconnectedAt: null,
+    reconnectAttempts: 0,
+    _healthInterval: null,
+    stopHealthCheck,
   }
 
   function updateTimestamps() {
@@ -83,11 +137,100 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
     try {
       require('qrcode-terminal').generate(qr, { small: true })
     } catch (qrErr) {
-      console.warn(`[${session.id}] Error generando QR en terminal:`, qrErr?.message || qrErr)
+      logger.warn({ sessionId: session.id, err: qrErr?.message }, 'Error generando QR en terminal')
     }
   }
 
+  function startHealthCheck() {
+    stopHealthCheck()
+    session._healthInterval = setInterval(() => {
+      try {
+        const ws = session.client?.ws
+        if (ws && ws.readyState !== 1 && session.isClientReady) {
+          logger.warn({ sessionId: session.id, readyState: ws.readyState }, 'Health check: socket not open, reconnecting...')
+          session.isClientReady = false
+          session.reconnectAttempts += 1
+          startSocket()
+        }
+      } catch (err) {
+        logger.warn({ sessionId: session.id, err: err.message }, 'Health check error')
+      }
+    }, HEALTH_CHECK_INTERVAL_MS)
+  }
+
+  function stopHealthCheck() {
+    if (session._healthInterval) {
+      clearInterval(session._healthInterval)
+      session._healthInterval = null
+    }
+  }
+
+  function getReconnectDelay() {
+    const delay = Math.min(INITIAL_RECONNECT_DELAY_MS * Math.pow(2, session.reconnectAttempts), MAX_RECONNECT_DELAY_MS)
+    const jitter = Math.random() * 1000
+    return delay + jitter
+  }
+
+  async function startBridgeMode() {
+    const bridgeUrl = getBridgeUrlForSession(session.id)
+    if (!bridgeUrl) return false
+
+    logger.info({ sessionId: session.id, bridgeUrl }, 'Bridge mode activado')
+    session.sessionStatus = 'connecting'
+    session.lastSessionMessage = `Conectando via bridge (${bridgeUrl})...`
+
+    const { client: bridgeClient, startPolling, stopPolling: stopBridgePolling } = createBridgeClient(bridgeUrl)
+    session.client = bridgeClient
+    session._bridgeStopPolling = stopBridgePolling
+
+    // bridge client polls /status every 5s and updates its internal status
+    startPolling(BRIDGE_POLL_INTERVAL_MS)
+    // sync session state from bridge status on every poll
+    session._bridgePollTimer = setInterval(async () => {
+      try {
+        const res = await fetchWithTimeout(bridgeUrl + '/status', { timeout: 8_000 })
+        if (!res) return
+        const s = await res.json()
+        applyBridgeStatus(s)
+        if (s?.ready) {
+          session.scheduler.startChecker(bridgeClient)
+        }
+      } catch (err) {
+        logger.warn({ sessionId: session.id, err: err?.message }, 'Bridge poll error')
+      }
+    }, BRIDGE_POLL_INTERVAL_MS)
+
+    // initial fetch
+    try {
+      const res = await fetchWithTimeout(bridgeUrl + '/status', { timeout: 8_000 })
+      if (res) applyBridgeStatus(await res.json())
+    } catch (err) {
+      logger.warn({ sessionId: session.id, err: err?.message }, 'Bridge initial fetch error')
+    }
+
+    return true
+  }
+
+  function applyBridgeStatus(s) {
+    if (!s) return
+    session.isClientReady = Boolean(s.ready)
+    session.sessionStatus = s.status || 'disconnected'
+    session.lastSessionMessage = s.message || ''
+    session.lastQrDataUrl = s.qr?.dataUrl || null
+    session.lastQr = s.qr?.available ? 'bridge-qr' : null
+    session.connectedAt = s.connection?.connectedAt || session.connectedAt
+    session.disconnectedAt = s.connection?.disconnectedAt || session.disconnectedAt
+    session.reconnectAttempts = s.connection?.reconnectAttempts || 0
+  }
+
+  async function bridgeFetchOnce(url) {
+    try { const r = await fetchWithTimeout(url, { timeout: 8_000 }); return r ? await r.json() : null } catch { return null }
+  }
+
   async function startSocket() {
+    // Check bridge mode first
+    if (await startBridgeMode()) return
+
     const authPath = join(sessionDataDir, 'auth')
 
     let state, saveCreds
@@ -96,13 +239,13 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
       state = r.state
       saveCreds = r.saveCreds
     } catch (err) {
-      console.error(`[${session.id}] Error loading auth state:`, err.message)
+      logger.error({ sessionId: session.id, err: err.message }, 'Error loading auth state')
       session.sessionStatus = 'disconnected'
       session.lastSessionMessage = 'Error al cargar credenciales: ' + err.message
       return
     }
 
-    console.log(`[${session.id}] Starting Baileys socket...`)
+    logger.info({ sessionId: session.id, attempt: session.reconnectAttempts + 1 }, 'Starting Baileys socket')
     const sock = makeWASocket({
       auth: state,
       printQRInTerminal: true,
@@ -110,6 +253,8 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
       markOnlineOnConnect: false,
+      keepAliveIntervalMs: 30_000,
+      retryRequestOnFail: true,
     })
 
     sock.ev.on('creds.update', saveCreds)
@@ -119,7 +264,7 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
         updateTimestamps()
         const { connection, lastDisconnect, qr } = update
 
-        console.log(`[${session.id}] connection.update:`, JSON.stringify({ connection, hasQr: !!qr, lastError: lastDisconnect?.error?.message }))
+        logger.debug({ sessionId: session.id, connection, hasQr: !!qr, lastError: lastDisconnect?.error?.message }, 'connection.update')
 
         if (qr) {
         session.manuallyDisconnected = false
@@ -137,7 +282,11 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
         session.lastQrDataUrl = null
         session.sessionStatus = 'ready'
         session.lastSessionMessage = 'WhatsApp conectado correctamente'
+        session.connectedAt = new Date().toISOString()
+        session.disconnectedAt = null
+        session.reconnectAttempts = 0
         session.scheduler.startChecker(sock)
+        startHealthCheck()
       }
 
       if (connection === 'close') {
@@ -147,35 +296,52 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
         session.isClientReady = false
         session.lastQr = null
         session.lastQrDataUrl = null
+        session.disconnectedAt = new Date().toISOString()
+        stopHealthCheck()
 
-        console.log(`[${session.id}] Connection closed. statusCode: ${statusCode}, shouldReconnect: ${shouldReconnect}, reason: ${lastDisconnect?.error?.message}`)
+        logger.warn({ sessionId: session.id, statusCode, shouldReconnect, reason: lastDisconnect?.error?.message }, 'Connection closed')
+
+        // Notificar webhook de desconexion
+        notifyDisconnectWebhook(session.id, statusCode, lastDisconnect?.error?.message, session.reconnectAttempts)
 
         if (statusCode === DisconnectReason.loggedOut) {
           session.sessionStatus = 'logged_out'
           session.lastSessionMessage = 'Sesion cerrada. Escanea el QR nuevamente.'
+          session.reconnectAttempts = 0
         } else {
           session.sessionStatus = 'disconnected'
           session.lastSessionMessage = lastDisconnect?.error?.message || 'Desconectado'
+          session.reconnectAttempts += 1
         }
 
         if (shouldReconnect && !session.manuallyDisconnected) {
-          setTimeout(startSocket, 5000)
+          const delay = getReconnectDelay()
+          logger.info({ sessionId: session.id, delay: Math.round(delay), attempt: session.reconnectAttempts }, 'Reconnecting')
+          setTimeout(startSocket, delay)
         }
       }
     } catch (err) {
-      console.error(`[${session.id}] Error en connection.update:`, err?.message || err)
+      logger.error({ sessionId: session.id, err: err?.message }, 'Error en connection.update')
     }
   })
 
     session.client = sock
   }
 
+  function cleanupBridgeTimers() {
+    if (session._bridgePollTimer) { clearInterval(session._bridgePollTimer); session._bridgePollTimer = null }
+    if (typeof session._bridgeStopPolling === 'function') session._bridgeStopPolling()
+  }
+
   session.reinitializeClient = async ({ resetAttempts } = {}) => {
     if (session.manuallyDisconnected) return
+    stopHealthCheck()
+    cleanupBridgeTimers()
+    if (resetAttempts) session.reconnectAttempts = 0
     try {
       await startSocket()
     } catch (err) {
-      console.error(`[${session.id}] Error en startSocket:`, err?.message || err)
+      logger.error({ sessionId: session.id, err: err?.message }, 'Error en startSocket')
       session.sessionStatus = 'disconnected'
       session.lastSessionMessage = 'Error al iniciar socket: ' + (err?.message || 'desconocido')
     }
@@ -199,16 +365,19 @@ async function destroySession(sessionId) {
   session.sessionStatus = 'disconnected'
   session.lastSessionMessage = 'Sesion detenida'
   session.scheduler.stop()
+  if (typeof session.stopHealthCheck === 'function') session.stopHealthCheck()
+  if (session._bridgePollTimer) { clearInterval(session._bridgePollTimer); session._bridgePollTimer = null }
+  if (typeof session._bridgeStopPolling === 'function') session._bridgeStopPolling()
 
   if (session.client && typeof session.client.logout === 'function') {
     try { await session.client.logout() } catch (err) {
-      console.warn(`[${session.id}] Error en logout durante destroy:`, err?.message || err)
+      logger.warn({ sessionId: session.id, err: err?.message }, 'Error en logout durante destroy')
     }
   }
 
   if (session.client && typeof session.client.end === 'function') {
     try { session.client.end() } catch (err) {
-      console.warn(`[${session.id}] Error en end durante destroy:`, err?.message || err)
+      logger.warn({ sessionId: session.id, err: err?.message }, 'Error en end durante destroy')
     }
   }
 
@@ -222,6 +391,37 @@ function normalizeSessionId(id) {
   return normalized.length > 0 ? normalized : null
 }
 
+// Auto-healing watchdog: restarts sessions stuck in non-ready states
+const STUCK_TIMEOUT_MS = 5 * 60 * 1000
+let _healInterval = null
+
+function startAutoHeal() {
+  if (_healInterval) return
+  _healInterval = setInterval(() => {
+    const now = Date.now()
+    for (const [id, session] of sessions) {
+      if (session.manuallyDisconnected || session.isClientReady) continue
+      const updated = new Date(session.updatedAt || session.createdAt).getTime()
+      if (now - updated > STUCK_TIMEOUT_MS && !session.isClientReady) {
+        logger.warn({ sessionId: id, status: session.sessionStatus, stuckFor: Math.round((now - updated) / 1000) }, 'Sesion trabada, reiniciando')
+        session.reconnectAttempts = (session.reconnectAttempts || 0) + 1
+        session.reinitializeClient()
+      }
+    }
+  }, 30_000)
+  logger.info({ timeout: '5m', checkEvery: '30s' }, 'Auto-healing watchdog started')
+}
+
+function stopAutoHeal() {
+  if (_healInterval) {
+    clearInterval(_healInterval)
+    _healInterval = null
+  }
+}
+
+// Start auto-heal after module loads
+startAutoHeal()
+
 module.exports = {
   DEFAULT_SESSION_ID,
   createSession,
@@ -231,4 +431,5 @@ module.exports = {
   sessionSummary,
   destroySession,
   normalizeSessionId,
+  stopAutoHeal,
 }

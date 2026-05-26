@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { setToken } from '../api'
 
 type Props = {
@@ -12,9 +12,13 @@ export default function LoginPage({ apiBaseUrl, onLogin }: Props) {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [focused, setFocused] = useState<'user' | 'pass' | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
     setError('')
     setLoading(true)
 
@@ -23,6 +27,7 @@ export default function LoginPage({ apiBaseUrl, onLogin }: Props) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
+        signal: controller.signal,
       })
       const data = await res.json()
       if (!res.ok || !data.ok) {
@@ -34,6 +39,7 @@ export default function LoginPage({ apiBaseUrl, onLogin }: Props) {
       if (data.username) localStorage.setItem('username', data.username)
       onLogin()
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
       setError(err instanceof Error ? err.message : 'Error al iniciar sesion')
     } finally {
       setLoading(false)

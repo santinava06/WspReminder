@@ -1,124 +1,108 @@
-const { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync } = require('fs')
-const { join } = require('path')
+const logger = require('./logger')
+const { getDatabase } = require('./db')
+const { buildBaileysMessage } = require('./shared/baileys')
 
-const LEGACY_DATA_FILE = join(process.cwd(), '.data', 'scheduled-messages.json')
-
-function normalizeLoadedMessages(parsed) {
-  if (Array.isArray(parsed)) return parsed
-  if (Array.isArray(parsed?.messages)) return parsed.messages
-  return []
-}
-
-function ensureDirectory(dir) {
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true })
+function rowToMessage(r) {
+  const msg = {
+    id: r.id,
+    groups: JSON.parse(r.groups || '[]'),
+    message: r.message,
+    title: r.title || '',
+    scheduledAt: r.scheduled_at,
+    status: r.status,
+    lastError: r.last_error,
+    results: JSON.parse(r.results || '[]'),
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    username: r.username || null,
   }
-}
-
-function base64ToBuffer(base64) {
-  if (!base64) return null
-  const raw = base64.includes(',') ? base64.split(',')[1] : base64
-  return Buffer.from(raw, 'base64')
-}
-
-function buildBaileysMessage(payload) {
-  const msg = {}
-  const text = payload.message || payload.text || ''
-  const media = payload.media || null
-
-  if (!media) {
-    msg.text = text
-    return msg
+  if (r.media) {
+    try { msg.media = JSON.parse(r.media) } catch { msg.media = null }
   }
-
-  const buffer = base64ToBuffer(media.data)
-  if (!buffer) {
-    msg.text = text
-    return msg
-  }
-
-  const mimetype = (media.mimetype || '').toLowerCase()
-  const filename = media.filename || ''
-
-  if (mimetype.startsWith('image/')) {
-    msg.image = buffer
-    if (text) msg.caption = text
-  } else if (mimetype.startsWith('video/')) {
-    msg.video = buffer
-    if (text) msg.caption = text
-  } else if (mimetype.startsWith('audio/')) {
-    msg.audio = buffer
-    msg.ptt = mimetype.includes('ogg')
-  } else {
-    msg.document = buffer
-    msg.mimetype = mimetype || 'application/octet-stream'
-    msg.fileName = filename || 'file'
-    if (text) msg.caption = text
-  }
-
   return msg
 }
 
 class Scheduler {
-  constructor({ dataDir, onSendScheduled } = {}) {
-    this.dataDir = dataDir
-    this.dataFile = join(this.dataDir, 'scheduled-messages.json')
+  constructor({ dataDir, sessionId, onSendScheduled } = {}) {
+    this.sessionId = sessionId || 'unknown'
     this.messages = []
     this.checkInterval = null
     this.sendingIds = new Set()
     this.onSendScheduled = onSendScheduled || null
-
     this.load()
-  }
-
-  migrateLegacyDataFile() {
-    try {
-      if (existsSync(this.dataFile) || !existsSync(LEGACY_DATA_FILE)) return
-      ensureDirectory(this.dataDir)
-      copyFileSync(LEGACY_DATA_FILE, this.dataFile)
-      console.log('Scheduled messages migrated to session data path:', this.dataFile)
-    } catch (err) {
-      console.error('Error migrating scheduled messages:', err.message)
-    }
   }
 
   load() {
     try {
-      this.migrateLegacyDataFile()
-      ensureDirectory(this.dataDir)
-      if (!existsSync(this.dataFile)) {
-        this.messages = []
-        this.save()
-        return
+      const db = getDatabase()
+      const rows = db.prepare('SELECT * FROM scheduled_messages ORDER BY created_at ASC').all()
+      this.messages = rows.map(rowToMessage)
+      let changed = false
+      for (const msg of this.messages) {
+        if (msg.status === 'sending') {
+          msg.status = 'failed'
+          msg.lastError = 'El servidor se reinicio mientras se enviaba este mensaje'
+          msg.updatedAt = new Date().toISOString()
+          changed = true
+        }
       }
-      const raw = readFileSync(this.dataFile, 'utf8')
-      this.messages = normalizeLoadedMessages(JSON.parse(raw))
-    } catch {
-      this.messages = []
-      this.save()
-    }
-  }
-
-  save() {
-    try {
-      ensureDirectory(this.dataDir)
-      writeFileSync(this.dataFile, JSON.stringify({ messages: this.messages }, null, 2), 'utf8')
+      if (changed) this._syncAllToDb()
     } catch (err) {
-      console.error('Error saving scheduled messages:', err.message)
+      logger.error({ err: err.message }, 'Error loading scheduled messages from SQLite')
+      this.messages = []
     }
   }
 
-  getAll() {
-    return this.messages
+  _syncAllToDb() {
+    try {
+      const db = getDatabase()
+      const sid = this.sessionId
+      const replace = db.prepare(`INSERT OR REPLACE INTO scheduled_messages (id, session_id, groups, message, title, scheduled_at, status, last_error, results, created_at, updated_at, username, media) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      const tx = db.transaction((msgs) => {
+        db.prepare('DELETE FROM scheduled_messages').run()
+        for (const m of msgs) {
+          replace.run(m.id, sid, JSON.stringify(m.groups || []), m.message || '', m.title || '', m.scheduledAt, m.status || 'pending', m.lastError || null, JSON.stringify(m.results || []), m.createdAt, m.updatedAt, m.username || null, m.media ? JSON.stringify(m.media) : null)
+        }
+      })
+      tx(this.messages)
+    } catch (err) {
+      logger.error({ err: err.message }, 'Error syncing scheduled messages to SQLite')
+    }
   }
 
-  getById(id) {
-    return this.messages.find(m => m.id === id) || null
+  _upsert(msg) {
+    try {
+      const db = getDatabase()
+      db.prepare(`INSERT OR REPLACE INTO scheduled_messages (id, session_id, groups, message, title, scheduled_at, status, last_error, results, created_at, updated_at, username, media) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        msg.id, this.sessionId, JSON.stringify(msg.groups || []), msg.message || '', msg.title || '', msg.scheduledAt, msg.status || 'pending', msg.lastError || null, JSON.stringify(msg.results || []), msg.createdAt, msg.updatedAt, msg.username || null, msg.media ? JSON.stringify(msg.media) : null
+      )
+    } catch (err) {
+      logger.error({ err: err.message, msgId: msg.id }, 'Error upserting scheduled message')
+    }
   }
+
+  _delete(id) {
+    try {
+      const db = getDatabase()
+      db.prepare('DELETE FROM scheduled_messages WHERE id = ?').run(id)
+    } catch (err) {
+      logger.error({ err: err.message, msgId: id }, 'Error deleting scheduled message')
+    }
+  }
+
+  getMissed() {
+    const now = new Date().toISOString()
+    return this.messages.filter(m => ['pending', 'waiting_connection'].includes(m.status) && m.scheduledAt <= now)
+  }
+
+  getAll() { return this.messages }
+
+  getById(id) { return this.messages.find(m => m.id === id) || null }
 
   create({ groups, message, scheduledAt, media, username, title }) {
     const msg = {
       id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      sessionId: this.sessionId,
       groups,
       message,
       title: title || '',
@@ -130,13 +114,11 @@ class Scheduler {
       updatedAt: new Date().toISOString(),
       username: username || null,
     }
-
     if (media) {
       msg.media = { mimetype: media.mimetype, data: media.data, filename: media.filename, filesize: media.filesize }
     }
-
     this.messages.push(msg)
-    this.save()
+    this._upsert(msg)
     return msg
   }
 
@@ -145,7 +127,7 @@ class Scheduler {
     if (!msg || msg.status === 'sent' || msg.status === 'cancelled') return null
     msg.status = 'cancelled'
     msg.updatedAt = new Date().toISOString()
-    this.save()
+    this._upsert(msg)
     return msg
   }
 
@@ -153,7 +135,7 @@ class Scheduler {
     const idx = this.messages.findIndex(m => m.id === id)
     if (idx === -1) return false
     this.messages.splice(idx, 1)
-    this.save()
+    this._delete(id)
     return true
   }
 
@@ -161,7 +143,7 @@ class Scheduler {
     const idx = this.messages.findIndex(m => m.id === msg.id)
     if (idx === -1) return false
     this.messages[idx] = msg
-    this.save()
+    this._upsert(msg)
     return true
   }
 
@@ -185,13 +167,11 @@ class Scheduler {
   async sendScheduledMessage(client, msg) {
     if (this.sendingIds.has(msg.id)) return
     this.sendingIds.add(msg.id)
-
     try {
       msg.status = 'sending'
       msg.lastError = null
       msg.updatedAt = new Date().toISOString()
       this.update(msg)
-
       for (const group of msg.groups) {
         try {
           const baileysMsg = buildBaileysMessage({ message: msg.message, media: msg.media })
@@ -201,18 +181,14 @@ class Scheduler {
           msg.results.push({ groupId: group.id, groupName: group.name, ok: false, error: err.message })
         }
       }
-
       const failed = msg.results.filter(r => !r.ok)
       msg.status = failed.length === 0 ? 'sent' : failed.length === msg.groups.length ? 'failed' : 'sent'
       msg.lastError = failed.length > 0 ? `${failed.length} grupos fallaron al enviar.` : null
       msg.updatedAt = new Date().toISOString()
       this.update(msg)
-
       if (typeof this.onSendScheduled === 'function') {
-        try {
-          this.onSendScheduled(msg)
-        } catch (err) {
-          console.error('Error in onSendScheduled callback:', err.message)
+        try { this.onSendScheduled(msg) } catch (err) {
+          logger.error({ err: err.message }, 'Error in onSendScheduled callback')
         }
       }
     } finally {
@@ -224,26 +200,23 @@ class Scheduler {
     this._client = client
     if (this.checkInterval) return
     this.load()
-
+    const missed = this.getMissed()
+    if (missed.length > 0) logger.info({ count: missed.length }, 'Mensajes pendientes detectados al iniciar')
     this.checkInterval = setInterval(async () => {
       try {
         const pending = this.getPending()
         if (pending.length === 0) return
-
         if (!this.isClientReady(this._client)) {
-          pending.forEach((msg) => this.markWaitingForConnection(msg))
+          pending.forEach(msg => this.markWaitingForConnection(msg))
           return
         }
-
         for (const msg of pending) {
           await this.sendScheduledMessage(this._client, msg)
         }
       } catch (err) {
-        console.error('[Scheduler] Error en ciclo de verificacion:', err?.message || err)
+        logger.error({ err: err?.message }, 'Error en ciclo de verificacion')
       }
     }, 10_000)
-
-    console.log(`Scheduler started for ${this.dataFile} (checking every 10s)`)
   }
 
   async sendNow(client, id) {
@@ -259,7 +232,6 @@ class Scheduler {
       clearInterval(this.checkInterval)
       this.checkInterval = null
       this.sendingIds = new Set()
-      console.log('Scheduler stopped for', this.dataFile)
     }
   }
 }

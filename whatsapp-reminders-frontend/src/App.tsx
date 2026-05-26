@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, FormEvent } from 'react'
-import { Calendar, Command as CommandIcon, History, Image, PanelLeftClose, PanelLeftOpen, RefreshCw, Send, SunMoon } from 'lucide-react'
+import { Bell, Calendar, Command as CommandIcon, History, Image, PanelLeftClose, PanelLeftOpen, RefreshCw, Send, SunMoon } from 'lucide-react'
 import CommandPalette from './components/CommandPalette'
 import GroupList from './components/GroupList'
 import type { Group } from './components/GroupList'
@@ -15,8 +15,9 @@ import useSendHistory from './hooks/useSendHistory'
 import type { SendHistoryItem, SendProgressResult } from './hooks/useSendHistory'
 import type { MediaAttachment } from './hooks/useScheduledMessages'
 import useScheduledMessages from './hooks/useScheduledMessages'
+import useNotifications from './hooks/useNotifications'
 import useSettings from './hooks/useSettings'
-import { apiFetch, getToken, getStoredSessionId } from './api'
+import { apiFetch, getToken, getStoredSessionId, isAbortError } from './api'
 import { useToast } from './components/Toast'
 import LoginPage from './components/LoginPage'
 
@@ -385,6 +386,9 @@ function App() {
   const [pendingOpenSchedule, setPendingOpenSchedule] = useState(false)
   const [pendingConfirmation, setPendingConfirmation] = useState<PendingSendConfirmation | null>(null)
   const cancelSendRef = useRef(false)
+  const statusAbortRef = useRef<AbortController | null>(null)
+  const groupsAbortRef = useRef<AbortController | null>(null)
+  const sendAbortRef = useRef<AbortController | null>(null)
   const { toast } = useToast()
 
   const sessionConnected = Boolean(status?.ready)
@@ -398,6 +402,7 @@ function App() {
     clearMessages,
     statusLabel,
   } = useScheduledMessages(apiBaseUrl, selectedSessionId, sessionConnected)
+  const { requestNotifyPermission } = useNotifications(scheduledMessages)
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
 
   useEffect(() => {
@@ -493,13 +498,16 @@ function App() {
 
   const fetchStatus = useCallback(async () => {
     if (!selectedSessionId || !getToken()) return null
+    statusAbortRef.current?.abort()
+    const controller = new AbortController()
+    statusAbortRef.current = controller
     setStatusState('loading')
     setStatusError('')
 
     const url = `${apiBaseUrl}/sessions/${selectedSessionId}/status`
 
     try {
-      const response = await apiFetch(url)
+      const response = await apiFetch(url, { signal: controller.signal })
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`)
@@ -510,6 +518,7 @@ function App() {
       setStatusState('success')
       return data
     } catch (error) {
+      if (isAbortError(error)) return null
       setStatus(null)
       setStatusState('error')
       setStatusError(error instanceof Error ? error.message : 'No se pudo consultar el estado')
@@ -519,6 +528,9 @@ function App() {
 
   const loadGroups = useCallback(async ({ force = false } = {}) => {
     if (!getToken()) return
+    groupsAbortRef.current?.abort()
+    const controller = new AbortController()
+    groupsAbortRef.current = controller
     const hasGroups = groupsCountRef.current > 0
     const base = `${apiBaseUrl}/sessions/${selectedSessionId}`
     const nextUrl = force
@@ -536,7 +548,7 @@ function App() {
     performance.mark('groups-load-start')
 
     try {
-      const response = await apiFetch(nextUrl)
+      const response = await apiFetch(nextUrl, { signal: controller.signal })
       const data = (await response.json()) as GroupsResponse
 
       if (response.status === 503 && data.ready === false) {
@@ -571,6 +583,7 @@ function App() {
       performance.mark('groups-load-success')
       performance.measure('groups-load', 'groups-load-start', 'groups-load-success')
     } catch (error) {
+      if (isAbortError(error)) { setGroupsRefreshing(false); return }
       setSelectedGroup(null)
       setGroupState('error')
       setGroupError(error instanceof Error ? error.message : 'No se pudieron cargar los grupos')
@@ -783,6 +796,7 @@ function App() {
       headers: {
         'Content-Type': 'application/json',
       },
+      signal: sendAbortRef.current?.signal,
       body: JSON.stringify(body),
     })
     const data = (await response.json()) as SendResponse
@@ -795,6 +809,9 @@ function App() {
   const runSequentialSend = async (destinationGroups: Group[], reminderMessage: string, media?: MediaAttachment | null) => {
     markGroupsAsUsed(destinationGroups.map((group) => group.id))
     cancelSendRef.current = false
+    sendAbortRef.current?.abort()
+    const sendController = new AbortController()
+    sendAbortRef.current = sendController
     setSendState('loading')
     setSendFeedback('')
     setCurrentSendIndex(0)
@@ -984,6 +1001,7 @@ function App() {
       const response = await apiFetch(`${sessionBaseUrl}/disconnect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: statusAbortRef.current?.signal,
       })
       const data = await response.json()
 
@@ -1035,6 +1053,15 @@ function App() {
       window.location.reload()
     }, 750)
   }, [status?.message, status?.status])
+
+  // Cleanup all in-flight requests on unmount
+  useEffect(() => {
+    return () => {
+      statusAbortRef.current?.abort()
+      groupsAbortRef.current?.abort()
+      sendAbortRef.current?.abort()
+    }
+  }, [])
 
   useEffect(() => {
     const closeTopLayer = (event: KeyboardEvent) => {
@@ -1138,6 +1165,9 @@ function App() {
               <span>Admin</span>
             </button>
           )}
+          <button className={ghostButton} type="button" onClick={requestNotifyPermission} title="Activar notificaciones del navegador">
+            <Bell size={16} />
+          </button>
           <button className={secondaryButton} type="button" onClick={() => setIsScheduledOpen(true)}>
             <Calendar size={16} />
             <span>Programados</span>
@@ -1158,94 +1188,84 @@ function App() {
           <section className={sidebarPanelClass}>
             <div className="flex items-start justify-between gap-3">
               {!settings.sidebarCollapsed && (
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="section-kicker">Sesion</p>
-                  <h2 className="mt-1 text-base font-semibold text-slate-950">
-                    {connectionStatus.label}
+                  <h2 className="mt-1 truncate text-base font-semibold text-slate-950">
+                    {displayName}
                   </h2>
                 </div>
               )}
-              <span className={`mt-1 h-2.5 w-2.5 rounded-full ${isConnectionReady ? 'bg-emerald-500' : isConnectionProblem ? 'bg-rose-500' : 'bg-amber-500'}`} />
-              <button className="icon-btn h-8 w-8" type="button" onClick={toggleSidebar}>
-                {settings.sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-              </button>
-            </div>
-            {!settings.sidebarCollapsed && status?.chromeRunning && !status?.ready && !status?.qr?.available && (
-              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
-                <p className="text-sm font-medium text-amber-900">Chrome esta abierto</p>
-                <p className="mt-0.5 text-xs text-amber-800">Cerralo completamente y reinicia la app para conectar sin QR.</p>
-              </div>
-            )}
-            {!settings.sidebarCollapsed && statusState === 'error' && <p className="mt-3 text-sm text-rose-700">{statusError}</p>}
-            {!settings.sidebarCollapsed && (userName || userPhone ? (
-              <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-xs font-medium text-emerald-700">Autenticado</p>
-                    <p className="mt-0.5 text-sm font-semibold text-emerald-900">{userName}</p>
-                    {userPhone && <p className="text-xs font-medium text-emerald-600">+{userPhone}</p>}
-                  </div>
-                  <button
-                    className={`shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium transition ${
-                      disconnectState === 'loading'
-                        ? 'bg-rose-200 text-rose-400 cursor-not-allowed'
-                        : 'bg-rose-100 text-rose-700 hover:bg-rose-200'
-                    }`}
-                    type="button"
-                    disabled={disconnectState === 'loading'}
-                    onClick={requestDisconnect}
-                  >
-                    {disconnectState === 'loading' ? 'Desconectando...' : 'Desconectar'}
-                  </button>
-                </div>
-                {disconnectError && (
-                  <p className="mt-2 text-xs text-rose-600">{disconnectError}</p>
-                )}
-              </div>
-            ) : (
-              isReady && <p className="mt-3 text-sm text-slate-600">{statusDetail}</p>
-            ))}
-            {!settings.sidebarCollapsed && (
-              <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="text-xs font-semibold text-slate-500">Sesión</p>
-                    <p className="mt-1 text-sm font-semibold text-slate-950">{displayName}</p>
-                    <p className="mt-1 text-xs text-slate-500">{selectedSession?.message ?? 'Esperando conexion.'}</p>
-                  </div>
-                  <span className={`status-pill ${selectedSession?.ready ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
-                    {selectedSession?.ready ? 'Listo' : 'Pendiente'}
-                  </span>
-                </div>
-                <button
-                  className="mt-3 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 transition hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
-                  type="button"
-                  onClick={() => {
-                    localStorage.removeItem('auth_token')
-                    localStorage.removeItem('session_id')
-                    localStorage.removeItem('display_name')
-                    localStorage.removeItem('username')
-                    window.location.reload()
-                  }}
-                >
-                  Cerrar sesion
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={`mt-0.5 inline-block h-2.5 w-2.5 rounded-full ${isConnectionReady ? 'bg-emerald-500' : isConnectionProblem ? 'bg-rose-500' : 'bg-amber-500'}`} />
+                <button className="icon-btn h-8 w-8" type="button" onClick={toggleSidebar}>
+                  {settings.sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
                 </button>
               </div>
+            </div>
+            {!settings.sidebarCollapsed && (
+              <>
+                <div className="mt-3 flex items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    {userName || userPhone ? (
+                      <div className="flex flex-wrap items-baseline gap-x-2">
+                        <span className="text-sm font-semibold text-slate-800">{userName}</span>
+                        <span className="text-xs text-slate-500">{userPhone ? `+${userPhone}` : ''}</span>
+                      </div>
+                    ) : null}
+                    <p className="mt-0.5 text-xs text-slate-500">{connectionStatus.detail}</p>
+                  </div>
+                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    isConnectionReady ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'
+                  }`}>
+                    {isConnectionReady ? 'Conectado' : connectionStatus.label}
+                  </span>
+                </div>
+                <dl className="mt-3 grid grid-cols-3 gap-2 rounded-xl border border-slate-100 bg-slate-50/80 p-2.5 text-center">
+                  <div>
+                    <dd className="text-sm font-semibold text-slate-950">{groups.length}</dd>
+                    <dt className="text-[10px] font-medium text-slate-500">Grupos</dt>
+                  </div>
+                  <div>
+                    <dd className="text-sm font-semibold text-slate-950">{filteredGroups.length}</dd>
+                    <dt className="text-[10px] font-medium text-slate-500">Visibles</dt>
+                  </div>
+                  <div>
+                    <dd className="text-sm font-semibold text-slate-950">{selectedCount}</dd>
+                    <dt className="text-[10px] font-medium text-slate-500">Sel.</dt>
+                  </div>
+                </dl>
+                <div className="mt-3 flex gap-2">
+                  {(userName || userPhone) && (
+                    <button
+                      className={`flex-1 rounded-lg px-2.5 py-1.5 text-xs font-medium transition ${
+                        disconnectState === 'loading'
+                          ? 'bg-rose-100 text-rose-400 cursor-not-allowed'
+                          : 'bg-rose-50 text-rose-700 hover:bg-rose-100'
+                      }`}
+                      type="button"
+                      disabled={disconnectState === 'loading'}
+                      onClick={requestDisconnect}
+                    >
+                      {disconnectState === 'loading' ? 'Desconectando...' : 'Desconectar'}
+                    </button>
+                  )}
+                  <button
+                    className="flex-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-rose-50 hover:text-rose-700 hover:border-rose-200"
+                    type="button"
+                    onClick={() => {
+                      localStorage.removeItem('auth_token')
+                      localStorage.removeItem('session_id')
+                      localStorage.removeItem('display_name')
+                      localStorage.removeItem('username')
+                      window.location.reload()
+                    }}
+                  >
+                    Cerrar sesion
+                  </button>
+                </div>
+                {disconnectError && <p className="mt-2 text-xs text-rose-600">{disconnectError}</p>}
+              </>
             )}
-            <dl className={`mt-4 grid gap-2 text-center ${settings.sidebarCollapsed ? 'grid-cols-1' : 'grid-cols-3'}`}>
-              <div className="surface-card px-2 py-2.5">
-                <dt className="text-[11px] font-semibold text-slate-500">{settings.sidebarCollapsed ? 'G' : 'Grupos'}</dt>
-                <dd className="mt-1 text-base font-semibold text-slate-950">{groups.length}</dd>
-              </div>
-              <div className="surface-card px-2 py-2.5">
-                <dt className="text-[11px] font-semibold text-slate-500">{settings.sidebarCollapsed ? 'V' : 'Vista'}</dt>
-                <dd className="mt-1 text-base font-semibold text-slate-950">{filteredGroups.length}</dd>
-              </div>
-              <div className="surface-card px-2 py-2.5">
-                <dt className="text-[11px] font-semibold text-slate-500">{settings.sidebarCollapsed ? 'S' : 'Sel.'}</dt>
-                <dd className="mt-1 text-base font-semibold text-slate-950">{selectedCount}</dd>
-              </div>
-            </dl>
           </section>
 
           {!settings.sidebarCollapsed && <section className={`${sidebarPanelClass} overflow-hidden p-0`}>
@@ -1305,30 +1325,35 @@ function App() {
             <div className="flex items-center justify-between gap-3 px-4 py-3">
               {!settings.sidebarCollapsed && <h2 className="section-title">Historial</h2>}
               <button className="ui-btn ui-btn-ghost min-h-8 px-2 text-xs" type="button" onClick={() => setIsHistoryOpen(true)}>
-                {settings.sidebarCollapsed ? <History size={16} /> : 'Ver todo'}
+                {settings.sidebarCollapsed ? <History size={16} /> : `Ver todo (${sendHistory.length})`}
               </button>
             </div>
             {!settings.sidebarCollapsed && (
               <div className="scroll-area min-h-0 flex-1 overflow-auto px-4 pb-4">
                 {sendHistory.length === 0 ? (
-                  <p className="surface-card mt-1 border-dashed px-3 py-3 text-sm text-slate-500">Todavia no hay envios.</p>
+                  <p className="mt-1 rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">Todavia no hay envios.</p>
                 ) : (
-                  <div className="grid gap-2">
+                  <div className="grid gap-1.5">
                     {sendHistory.slice(0, 10).map((h) => (
                       <button
                         key={h.id}
-                        className="surface-card pressable w-full p-3 text-left transition hover:bg-slate-100"
+                        className="group w-full rounded-xl border border-slate-100 bg-white px-3 py-2.5 text-left transition hover:border-slate-200 hover:shadow-sm"
                         type="button"
                         onClick={() => { setOpenHistoryId(h.id); setIsHistoryOpen(true) }}
                       >
-                        <span className="block text-xs font-medium text-slate-500">{formatDate(h.createdAt)}</span>
-                        <span className="mt-1 block truncate text-sm font-semibold text-slate-950">{h.message}</span>
-                        <span className="mt-1 block text-xs text-slate-500">{h.sent}/{h.total} enviados{h.failed > 0 ? `, ${h.failed} fallidos` : ''}</span>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-medium text-slate-400">{formatDate(h.createdAt)}</span>
+                          <div className="flex items-center gap-1.5">
+                            {h.sent > 0 && <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">{h.sent} OK</span>}
+                            {h.failed > 0 && <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700">{h.failed} err</span>}
+                          </div>
+                        </div>
+                        <p className="mt-1 line-clamp-1 text-sm font-medium text-slate-900">{h.message}</p>
                       </button>
                     ))}
                     {sendHistory.length > 10 && (
-                      <button className="ui-btn ui-btn-ghost w-full text-xs" type="button" onClick={() => setIsHistoryOpen(true)}>
-                        Ver los {sendHistory.length - 10} restantes
+                      <button className="mt-1 w-full rounded-lg py-2 text-xs font-medium text-slate-500 transition hover:bg-slate-50" type="button" onClick={() => setIsHistoryOpen(true)}>
+                        Ver {sendHistory.length - 10} mas
                       </button>
                     )}
                   </div>

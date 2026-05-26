@@ -138,7 +138,8 @@ function HighlightedGroupName({ name, query, active }: { name: string; query: st
 }
 
 function normalizeForHighlight(value: string) {
-  return value
+  const v = value || ''
+  return v
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()

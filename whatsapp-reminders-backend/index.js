@@ -6,18 +6,82 @@ const sessionManager = require('./sessionManager')
 const { createSessionRouter, clearPersistedGroupsCache } = require('./app')
 const auth = require('./auth')
 const history = require('./history')
+const logger = require('./logger')
+const rateLimit = require('express-rate-limit')
+const pinoHttp = require('pino-http')
+const db = require('./db')
 
 require('dotenv').config()
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('[UNHANDLED_REJECTION]', reason instanceof Error ? reason.stack : reason)
+process.on('unhandledRejection', (reason) => {
+  logger.fatal({ err: reason instanceof Error ? reason.message : reason, stack: reason instanceof Error ? reason.stack : undefined }, 'Unhandled rejection')
 })
 
+process.on('uncaughtException', (err) => {
+  logger.fatal({ err: err.message, stack: err.stack }, 'Uncaught exception')
+  if (!process.exitCode) process.exitCode = 1
+  _gracefulShutdown('uncaughtException')
+})
+
+let _gracefulShutdown = async () => {}
+
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGUSR2']) {
+  if (process.listenerCount(sig) === 0) {
+    process.once(sig, () => _gracefulShutdown(sig))
+  }
+}
+
 const app = express()
-app.use(cors())
+
+// Request logging
+app.use(pinoHttp({ logger, autoLogging: { ignore: (req) => req.url === '/health' } }))
+
+// CORS hardening
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://wspreminder.vercel.app,http://localhost:5173,http://localhost:3000')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean)
+app.use(cors({
+  origin: ALLOWED_ORIGINS,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true,
+}))
+
 app.use(express.json({ limit: '20mb' }))
 
+// Request timeout middleware (120s for long-polling endpoints, 30s for others)
+app.use((req, res, next) => {
+  const timeout = req.path.startsWith('/health') ? 10_000 : 30_000
+  req.setTimeout(timeout, () => {
+    if (!res.headersSent) res.status(408).json({ ok: false, error: 'Tiempo de espera agotado' })
+  })
+  next()
+})
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: 'Demasiados intentos de login. Intenta de nuevo en 15 minutos.' },
+})
+
 const SESSION_NAMES = ['admin', 'comercial-1', 'comercial-2', 'academico-1', 'in', 'luciana']
+
+// Environment validation
+const OPTIONAL_ENV_VARS = [
+  { name: 'WEBHOOK_DISCONNECT_URL', desc: 'Webhook de notificacion de desconexion' },
+  { name: 'BRIDGE_URL', desc: 'URL del bridge local para todas las sesiones' },
+  { name: 'HISTORY_TTL_DAYS', desc: 'Dias de retencion del historial (default: 90)' },
+  { name: 'ALLOWED_ORIGINS', desc: 'Origenes CORS (default: Vercel + localhost)' },
+  { name: 'LOG_LEVEL', desc: 'Nivel de log: debug, info, warn, error (default: info en prod)' },
+]
+for (const v of OPTIONAL_ENV_VARS) {
+  if (!process.env[v.name]) {
+    logger.warn({ var: v.name, desc: v.desc }, 'Variable de entorno opcional no configurada')
+  }
+}
 
 function onSendCallback(msg) {
   const user = auth.getUserBySessionId(msg.sessionId || msg.username)
@@ -30,13 +94,44 @@ function onSendCallback(msg) {
   })
 }
 
-for (const name of SESSION_NAMES) {
-  if (!sessionManager.hasSession(name)) {
-    sessionManager.createSession(name, { onSendScheduled: onSendCallback })
+db.initDatabase().then(() => {
+  for (const name of SESSION_NAMES) {
+    if (!sessionManager.hasSession(name)) {
+      sessionManager.createSession(name, { onSendScheduled: onSendCallback })
+    }
   }
-}
 
-app.post('/api/login', (req, res) => {
+  // Migrate existing JSON data to SQLite (runs once)
+  db.migrateJsonToSqlite(SESSION_NAMES)
+}).catch(err => {
+  logger.fatal({ err: err.message, stack: err.stack }, 'Failed to initialize database')
+  process.exit(1)
+})
+
+// Public health endpoint (no auth required)
+app.get('/health', (req, res) => {
+  const sessions = sessionManager.listSessions()
+  const allReady = sessions.every(s => s.ready)
+  const uptime = process.uptime()
+  res.json({
+    ok: true,
+    status: allReady ? 'healthy' : 'degraded',
+    uptime: Math.floor(uptime),
+    sessions: sessions.map(s => ({
+      id: s.id,
+      status: s.status,
+      ready: s.ready,
+      qrAvailable: s.qrAvailable,
+      uptime: s.uptime,
+      reconnectAttempts: s.reconnectAttempts,
+    })),
+    memory: process.memoryUsage(),
+    version: process.env.npm_package_version || '1.0.0',
+    timestamp: new Date().toISOString(),
+  })
+})
+
+app.post('/api/login', loginLimiter, (req, res) => {
   const { username, password } = req.body
   if (!username || !password) {
     return res.status(400).json({ ok: false, error: 'Faltan username o password' })
@@ -51,16 +146,16 @@ app.post('/api/login', (req, res) => {
 function authMiddleware(req, res, next) {
   const header = req.headers.authorization
   if (!header || !header.startsWith('Bearer ')) {
-    console.log(`[auth] 401: no Bearer token. path: ${req.path}, method: ${req.method}`)
+    logger.warn({ path: req.path, method: req.method }, '401: no Bearer token')
     return res.status(401).json({ ok: false, error: 'Token requerido' })
   }
   const token = header.slice(7)
   const info = auth.authenticate(token)
   if (!info) {
-    console.log(`[auth] 401: token invalido. path: ${req.path}, token prefix: ${token.slice(0, 12)}...`)
+    logger.warn({ path: req.path, tokenPrefix: token.slice(0, 12) }, '401: token invalido')
     return res.status(401).json({ ok: false, error: 'Token invalido' })
   }
-  console.log(`[auth] OK: ${info.displayName} (${info.username}) -> ${info.sessionId} for ${req.method} ${req.path}`)
+  logger.info({ displayName: info.displayName, username: info.username, sessionId: info.sessionId, method: req.method, path: req.path }, 'Auth OK')
   req.userSessionId = info.sessionId
   req.username = info.username
   req.displayName = info.displayName
@@ -117,7 +212,7 @@ app.use('/sessions/:sessionId', (req, res, next) => {
 }, createSessionRouter())
 
 app.use('/', (req, res, next) => {
-  req.session = sessionManager.getSession(req.userSessionId) || defaultSession
+  req.session = sessionManager.getSession(req.userSessionId)
   next()
 }, createSessionRouter())
 
@@ -151,10 +246,12 @@ app.get('/admin/history', adminOnly, (req, res) => {
 })
 
 app.get('/admin/scheduled', adminOnly, (req, res) => {
-  const sessions = sessionManager.listSessions()
+  const summaries = sessionManager.listSessions()
   const all = []
-  for (const s of sessions) {
-    const msgs = s.scheduler.getAll()
+  for (const s of summaries) {
+    const session = sessionManager.getSession(s.id)
+    if (!session) continue
+    const msgs = session.scheduler.getAll()
     for (const m of msgs) {
       all.push({ ...m, sessionId: s.id })
     }
@@ -166,6 +263,57 @@ app.get('/admin/scheduled', adminOnly, (req, res) => {
 app.get('/admin/stats', adminOnly, (req, res) => {
   const stats = history.getAllStats()
   res.json({ ok: true, stats })
+})
+
+app.post('/admin/retry', adminOnly, async (req, res) => {
+  try {
+    const { historyId } = req.body
+    if (!historyId) return res.status(400).json({ ok: false, error: 'Falta historyId' })
+
+    const allHistory = history.getAllHistory()
+    const entry = allHistory.find(e => e.id === historyId)
+    if (!entry) return res.status(404).json({ ok: false, error: 'Entrada no encontrada' })
+
+    const failedGroups = entry.results.filter(r => !r.ok)
+    if (failedGroups.length === 0) return res.status(400).json({ ok: false, error: 'No hay grupos fallidos para reintentar' })
+
+    const session = sessionManager.getSession(entry.sessionId)
+    if (!session) return res.status(400).json({ ok: false, error: 'Sesion no encontrada' })
+    if (!session.isClientReady) return res.status(503).json({ ok: false, error: 'WhatsApp no conectado para esta sesion' })
+
+    const results = []
+    for (const group of failedGroups) {
+      try {
+        const baileysMsg = { text: entry.message }
+        await session.client.sendMessage(group.id, baileysMsg)
+        results.push({ id: group.id, name: group.name, ok: true })
+      } catch (err) {
+        results.push({ id: group.id, name: group.name, ok: false, error: err.message })
+      }
+    }
+
+    history.logSend(entry.sessionId, entry.username, {
+      message: entry.message,
+      results,
+      hasMedia: entry.hasMedia || false,
+      mode: 'retry',
+    })
+
+    const failed = results.filter(r => !r.ok)
+    res.json({
+      ok: failed.length === 0,
+      message: failed.length === 0
+        ? `Reintentado con exito a ${results.length} grupos`
+        : `Reintentado a ${results.length - failed.length} de ${results.length} grupos`,
+      total: results.length,
+      sent: results.length - failed.length,
+      failed: failed.length,
+      results,
+    })
+  } catch (err) {
+    logger.error({ err: err.message, stack: err.stack }, 'Error al reintentar envio')
+    res.status(500).json({ ok: false, error: 'No se pudo reintentar el envio' })
+  }
 })
 
 app.post('/admin/disconnect/:sessionId', adminOnly, async (req, res) => {
@@ -181,22 +329,26 @@ app.post('/admin/disconnect/:sessionId', adminOnly, async (req, res) => {
     session.lastQrDataUrl = null
     session.cachedGroups = []
     session.cachedGroupsAt = null
+    session.disconnectedAt = new Date().toISOString()
     if (session.groupsCachePersistence !== false) {
       clearPersistedGroupsCache(session)
     }
     session.sessionStatus = 'starting'
     session.lastSessionMessage = 'Sesion desconectada por admin. Generando nuevo QR...'
     session.scheduler.stop()
+    if (typeof session.stopHealthCheck === 'function') session.stopHealthCheck()
+    if (session._bridgePollTimer) { clearInterval(session._bridgePollTimer); session._bridgePollTimer = null }
+    if (typeof session._bridgeStopPolling === 'function') session._bridgeStopPolling()
 
     try {
       await session.client.logout()
     } catch (logoutError) {
-      console.warn('No se pudo cerrar sesion con logout:', logoutError?.message || logoutError)
+      logger.warn({ err: logoutError?.message }, 'No se pudo cerrar sesion con logout')
     }
 
     if (session.client && typeof session.client.end === 'function') {
       try { session.client.end() } catch (endErr) {
-        console.warn(`[${session.id}] Error al cerrar socket:`, endErr?.message || endErr)
+        logger.warn({ sessionId: session.id, err: endErr?.message }, 'Error al cerrar socket')
       }
     }
 
@@ -205,7 +357,7 @@ app.post('/admin/disconnect/:sessionId', adminOnly, async (req, res) => {
     try {
       if (existsSync(authPath)) rmSync(authPath, { recursive: true, force: true })
     } catch (err) {
-      console.warn(`[${session.id}] Could not clear auth directory:`, err.message)
+      logger.warn({ sessionId: session.id, err: err.message }, 'Could not clear auth directory')
     }
 
     session.manuallyDisconnected = false
@@ -217,18 +369,71 @@ app.post('/admin/disconnect/:sessionId', adminOnly, async (req, res) => {
       message: `Sesion de ${user ? user.displayName : req.params.sessionId} desconectada. QR generado para reconectar.`,
     })
   } catch (error) {
-    console.error('Error al desconectar sesion:', error)
+    logger.error({ err: error.message, stack: error.stack }, 'Error al desconectar sesion')
     res.status(500).json({ ok: false, error: 'No se pudo desconectar la sesion' })
   }
 })
 
 app.use((err, req, res, next) => {
-  console.error('[EXPRESS_ERROR]', req.method, req.path, err instanceof Error ? err.stack : err)
+  logger.error({ method: req.method, path: req.path, err: err instanceof Error ? err.message : err, stack: err instanceof Error ? err.stack : undefined }, 'Express error')
   res.status(500).json({ ok: false, error: 'Error interno del servidor' })
 })
 
 const HOST = process.env.HOST || '0.0.0.0'
 const PORT = process.env.PORT || 3177
-app.listen(PORT, HOST, () => {
-  console.log(`Servidor escuchando en http://${HOST === '0.0.0.0' ? '0.0.0.0' : HOST}:${PORT}`)
+let server = null
+
+db.initDatabase().then(() => {
+  server = app.listen(PORT, HOST, () => {
+    logger.info({ host: HOST, port: PORT }, 'Servidor iniciado')
+  })
+}).catch(err => {
+  logger.fatal({ err: err.message, stack: err.stack }, 'Failed to start server')
+  process.exit(1)
 })
+
+_gracefulShutdown = async (signal) => {
+  if (global._shuttingDown) return
+  global._shuttingDown = true
+  logger.info({ signal }, 'Iniciando apagado graceful')
+
+  // Stop accepting new connections
+  server.close(() => logger.info('HTTP server cerrado'))
+
+  // Stop all schedulers (flushes pending saves)
+  for (const name of SESSION_NAMES) {
+    try {
+      const session = sessionManager.getSession(name)
+      if (session?.scheduler) {
+        logger.info({ sessionId: name }, 'Deteniendo scheduler')
+        session.scheduler.stop()
+      }
+    } catch (err) {
+      logger.error({ sessionId: name, err: err.message }, 'Error al detener scheduler')
+    }
+  }
+
+  // Stop history auto-clean
+  try { history.stopAutoClean() } catch (err) { logger.warn({ err: err.message }, 'Error stopping history cleaner') }
+
+  // Stop auto-healing watchdog
+  try { sessionManager.stopAutoHeal() } catch (err) { logger.warn({ err: err.message }, 'Error stopping auto-heal') }
+
+  // Close database
+  try { db.closeDatabase() } catch (err) { logger.warn({ err: err.message }, 'Error closing database') }
+
+  // Destroy all WhatsApp sessions
+  for (const name of SESSION_NAMES) {
+    try {
+      if (sessionManager.hasSession(name)) {
+        logger.info({ sessionId: name }, 'Destruyendo sesion')
+        await sessionManager.destroySession(name)
+      }
+    } catch (err) {
+      logger.error({ sessionId: name, err: err.message }, 'Error al destruir sesion')
+    }
+  }
+
+  logger.info('Apagado graceful completado')
+  setTimeout(() => process.exit(process.exitCode || 0), 1000)
+}

@@ -43,6 +43,10 @@ export async function parseApiError(response: Response, fallback?: string): Prom
   return fallback || `Error del servidor (${response.status})`
 }
 
+export function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError'
+}
+
 export function getApiBaseUrl(): string {
   return import.meta.env.VITE_API_BASE_URL || 'http://localhost:3177'
 }

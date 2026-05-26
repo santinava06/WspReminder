@@ -2,6 +2,9 @@ const express = require('express')
 const { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync, copyFileSync, rmSync } = require('fs')
 const { join, resolve } = require('path')
 const history = require('./history')
+const logger = require('./logger')
+const { buildBaileysMessage } = require('./shared/baileys')
+const { formatUptime } = require('./shared/utils')
 
 const DEFAULT_GROUPS_SYNC_TIMEOUT_MS = Number.parseInt(process.env.GROUPS_SYNC_TIMEOUT_MS, 10) || 30_000
 
@@ -51,7 +54,7 @@ const readPersistedGroupsCache = (session) => {
       cachedAt: parsedCache.cachedAt || null,
     }
   } catch (error) {
-    console.warn('No se pudo leer cache de grupos:', error?.message || error)
+    logger.warn({ error: error?.message }, 'No se pudo leer cache de grupos')
     return { groups: [], cachedAt: null }
   }
 }
@@ -62,7 +65,7 @@ const persistGroupsCache = (session, groups, cachedAt) => {
     if (!existsSync(session.dataDir)) mkdirSync(session.dataDir, { recursive: true })
     writeFileSync(groupsCacheFile, JSON.stringify({ cachedAt, groups }, null, 2), 'utf8')
   } catch (error) {
-    console.warn('No se pudo guardar cache de grupos:', error?.message || error)
+    logger.warn({ error: error?.message }, 'No se pudo guardar cache de grupos')
   }
 }
 
@@ -71,7 +74,7 @@ const clearPersistedGroupsCache = (session) => {
     const groupsCacheFile = getGroupsCacheFile(session)
     if (existsSync(groupsCacheFile)) unlinkSync(groupsCacheFile)
   } catch (error) {
-    console.warn('No se pudo borrar cache de grupos:', error?.message || error)
+    logger.warn({ error: error?.message }, 'No se pudo borrar cache de grupos')
   }
 }
 
@@ -141,52 +144,8 @@ const filterGroupsForResponse = (groups, { search, limit }) => {
 
 const refreshGroupsInBackground = (session) => {
   refreshGroupsCache(session).catch((error) => {
-    console.warn('No se pudo refrescar grupos en segundo plano:', error?.message || error)
+    logger.warn({ error: error?.message }, 'No se pudo refrescar grupos en segundo plano')
   })
-}
-
-function base64ToBuffer(base64) {
-  if (!base64) return null
-  const raw = base64.includes(',') ? base64.split(',')[1] : base64
-  return Buffer.from(raw, 'base64')
-}
-
-function buildBaileysMessage(payload) {
-  const msg = {}
-  const text = payload.message || payload.text || ''
-  const media = payload.media || null
-
-  if (!media) {
-    msg.text = text
-    return msg
-  }
-
-  const buffer = base64ToBuffer(media.data)
-  if (!buffer) {
-    msg.text = text
-    return msg
-  }
-
-  const mimetype = (media.mimetype || '').toLowerCase()
-  const filename = media.filename || ''
-
-  if (mimetype.startsWith('image/')) {
-    msg.image = buffer
-    if (text) msg.caption = text
-  } else if (mimetype.startsWith('video/')) {
-    msg.video = buffer
-    if (text) msg.caption = text
-  } else if (mimetype.startsWith('audio/')) {
-    msg.audio = buffer
-    msg.ptt = mimetype.includes('ogg')
-  } else {
-    msg.document = buffer
-    msg.mimetype = mimetype || 'application/octet-stream'
-    msg.fileName = filename || 'file'
-    if (text) msg.caption = text
-  }
-
-  return msg
 }
 
 const sendReminderToGroups = async (session, groups, message, media = null) => {
@@ -242,6 +201,13 @@ const getWhatsappStatus = (session) => {
     qr: !session.manuallyDisconnected && session.lastQrDataUrl
       ? { available: true, dataUrl: session.lastQrDataUrl }
       : { available: false, dataUrl: null },
+    connection: {
+      connectedAt: session.connectedAt || null,
+      disconnectedAt: session.disconnectedAt || null,
+      uptime: formatUptime(session.connectedAt),
+      reconnectAttempts: session.reconnectAttempts || 0,
+      healthCheckRunning: Boolean(session._healthInterval),
+    },
   }
 }
 
@@ -310,7 +276,7 @@ const createSessionRouter = () => {
 
       res.json({ ok: true, message: 'Recordatorio enviado' })
     } catch (error) {
-      console.error('Error enviando mensaje:', error)
+      logger.error({ error: error.message, stack: error.stack }, 'Error enviando mensaje')
       res.status(500).json({ ok: false, error: 'No se pudo enviar el mensaje' })
     }
   })
@@ -338,7 +304,7 @@ const createSessionRouter = () => {
 
       res.json(formatSendResults(results))
     } catch (error) {
-      console.error('Error enviando mensaje a todos los grupos:', error)
+      logger.error({ error: error.message, stack: error.stack }, 'Error enviando mensaje a todos los grupos')
       res.status(500).json({ ok: false, error: 'No se pudo enviar el mensaje a todos los grupos' })
     }
   })
@@ -370,7 +336,7 @@ const createSessionRouter = () => {
       })
       res.json(formatSendResults(results))
     } catch (error) {
-      console.error('Error enviando mensaje a grupos seleccionados:', error)
+      logger.error({ error: error.message, stack: error.stack }, 'Error enviando mensaje a grupos seleccionados')
       res.status(500).json({ ok: false, error: 'No se pudo enviar el mensaje a los grupos seleccionados' })
     }
   })
@@ -429,7 +395,7 @@ const createSessionRouter = () => {
         })
       }
 
-      console.error('Error obteniendo grupos:', error)
+      logger.error({ error: error.message, stack: error.stack }, 'Error obteniendo grupos')
       res.status(500).json({ ok: false, error: error.message })
     }
   })
@@ -453,7 +419,7 @@ const createSessionRouter = () => {
         rmSync(authPath, { recursive: true, force: true })
       }
     } catch (err) {
-      console.warn(`[${session.id}] Could not clear auth directory:`, err.message)
+      logger.warn({ sessionId: session.id, error: err.message }, 'Could not clear auth directory')
     }
   }
 
@@ -471,22 +437,26 @@ const createSessionRouter = () => {
       session.lastQrDataUrl = null
       session.cachedGroups = []
       session.cachedGroupsAt = null
+      session.disconnectedAt = new Date().toISOString()
       if (session.groupsCachePersistence !== false) {
         clearPersistedGroupsCache(session)
       }
       session.sessionStatus = 'starting'
       session.lastSessionMessage = 'Sesion desconectada. Generando un nuevo QR...'
       session.scheduler.stop()
+      if (typeof session.stopHealthCheck === 'function') session.stopHealthCheck()
+      if (session._bridgePollTimer) { clearInterval(session._bridgePollTimer); session._bridgePollTimer = null }
+      if (typeof session._bridgeStopPolling === 'function') session._bridgeStopPolling()
 
       try {
         await session.client.logout()
       } catch (logoutError) {
-        console.warn('No se pudo cerrar sesion con logout:', logoutError?.message || logoutError)
+        logger.warn({ error: logoutError?.message }, 'No se pudo cerrar sesion con logout')
       }
 
       if (session.client && typeof session.client.end === 'function') {
         try { session.client.end() } catch (endErr) {
-          console.warn('Error al cerrar socket:', endErr?.message || endErr)
+          logger.warn({ error: endErr?.message }, 'Error al cerrar socket')
         }
       }
 
@@ -496,7 +466,7 @@ const createSessionRouter = () => {
 
       res.json({ ok: true, message: 'Sesion de WhatsApp desconectada. Generando un nuevo QR para reconectar.' })
     } catch (error) {
-      console.error('Error al desconectar:', error)
+      logger.error({ error: error.message, stack: error.stack }, 'Error al desconectar')
       res.status(500).json({ ok: false, error: 'No se pudo desconectar la sesion' })
     }
   })
@@ -516,10 +486,15 @@ const createSessionRouter = () => {
         return res.status(400).json({ ok: false, error: 'Faltan groups, message o scheduledAt' })
       }
 
+      const schedAt = new Date(scheduledAt)
+      if (isNaN(schedAt.getTime()) || schedAt.getTime() <= Date.now()) {
+        return res.status(400).json({ ok: false, error: 'La fecha programada debe ser en el futuro' })
+      }
+
       const scheduled = session.scheduler.create({ groups, message, title: req.body.title, scheduledAt, media, username: req.username || session.id })
       res.status(201).json({ ok: true, message: 'Mensaje programado', scheduled })
     } catch (error) {
-      console.error('Error programando mensaje:', error)
+      logger.error({ error: error.message, stack: error.stack }, 'Error programando mensaje')
       res.status(500).json({ ok: false, error: 'No se pudo programar el mensaje' })
     }
   })
@@ -551,7 +526,7 @@ const createSessionRouter = () => {
 
       res.json({ ok: true, message: 'Mensaje enviado', scheduled: msg })
     } catch (error) {
-      console.error('Error enviando ahora:', error)
+      logger.error({ error: error.message, stack: error.stack }, 'Error enviando ahora')
       res.status(500).json({ ok: false, error: 'No se pudo enviar el mensaje' })
     }
   })

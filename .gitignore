@@ -23,6 +23,10 @@ whatsapp-reminders-frontend/src-tauri/target/
 whatsapp-reminders-backend/.data/
 whatsapp-reminders-frontend/src-tauri/.data/
 
+# Bridge data y logs
+whatsapp-reminders-backend/bridge-data/
+whatsapp-reminders-backend/logs/
+
 # Binarios / builds locales
 *.exe
 
