@@ -75,16 +75,6 @@ type SavedGroupList = {
   createdAt: string
 }
 
-type SessionSummary = {
-  id: string
-  status: string
-  ready: boolean
-  message?: string
-  qrAvailable: boolean
-  createdAt: string
-  updatedAt: string
-}
-
 const SAVED_GROUP_LISTS_STORAGE_KEY = 'whatsapp-reminders-saved-group-lists'
 const FAVORITE_GROUPS_STORAGE_KEY = 'whatsapp-reminders-favorite-groups'
 const RECENT_GROUPS_STORAGE_KEY = 'whatsapp-reminders-recent-groups'
