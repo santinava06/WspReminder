@@ -48,5 +48,5 @@ export function isAbortError(err: unknown): boolean {
 }
 
 export function getApiBaseUrl(): string {
-  return import.meta.env.VITE_API_BASE_URL || 'http://localhost:3177'
+  return import.meta.env.VITE_API_BASE_URL || 'https://bridge.wspreminder.online'
 }

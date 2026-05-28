@@ -8,7 +8,17 @@ Aplicación para enviar recordatorios masivos a grupos de WhatsApp desde el nave
 |------|-----------|
 | Frontend | React 19, TypeScript, Vite, Tailwind v4, cmdk |
 | Backend | Node.js, Express, Baileys (WhatsApp Web API) |
-| Base de datos | Archivos JSON locales (sesiones, historial, programaciones) |
+| Base de datos | SQLite (sesiones, historial, programaciones) |
+
+## Arquitectura
+
+```
+Frontend (Vercel) ──HTTPS──▶ Cloudflare Tunnel ──▶ Backend (PC local :9090)
+                                                        │
+                                                        └── Baileys (WhatsApp Web)
+```
+
+El backend corre **directamente en tu PC** con Baileys integrado. Ya no se necesita Render ni bridges separados. Las sesiones de WhatsApp persisten en disco local.
 
 ## Estructura
 
@@ -16,7 +26,7 @@ Aplicación para enviar recordatorios masivos a grupos de WhatsApp desde el nave
 whatsapp-reminders-backend/   # API Express + Baileys
   index.js                    # Servidor, rutas, middleware auth
   app.js                      # Router de sesión (envío, grupos, QR)
-  auth.js                     # 6 usuarios hardcodeados, tokens hash
+  auth.js                     # 8 usuarios hardcodeados, tokens hash
   sessionManager.js           # Gestión de sesiones Baileys
   scheduler.js                # Mensajes programados
   history.js                  # Historial de envíos
@@ -59,26 +69,29 @@ whatsapp-reminders-frontend/  # SPA React
 ## Inicio rápido
 
 ```bash
-# Backend
+# Iniciar backend + tunnel
 cd whatsapp-reminders-backend
 npm install
-node index.js        # http://localhost:3177
+npm start             # http://localhost:9090
 
 # Frontend (otra terminal)
 cd whatsapp-reminders-frontend
 npm install
-npm run dev          # http://localhost:5173
+npm run dev           # http://localhost:5173
 ```
 
-### Variables de entorno (opcional)
+### Variables de entorno
 
-**Backend:**
-- `PORT` — puerto del servidor (default: 3177)
+**.env en whatsapp-reminders-backend/:**
+- `PORT` — puerto del servidor (default: 9090)
+- `ALLOWED_ORIGINS` — orígenes CORS permitidos
+- `LOG_LEVEL` — nivel de log: debug, info, warn, error
 - `HOST` — interfaz de red (default: 0.0.0.0)
-- `WHATSAPP_REMINDERS_DATA_DIR` — directorio de datos (sesiones, histórico)
+- `WHATSAPP_REMINDERS_DATA_DIR` — directorio de datos
 
-**Frontend:**
-- `VITE_API_BASE_URL` — URL del backend (default: `http://localhost:3177`)
+**Frontend (Vercel):**
+- `VITE_API_BASE_URL` — URL del backend via tunnel (default: `http://localhost:9090`)<br>
+  En producción: `https://bridge.wspreminder.online`
 
 ## Funcionalidades
 
@@ -141,9 +154,9 @@ npm run dev          # http://localhost:5173
 - `GET /admin/stats` — estadísticas agregadas
 - `POST /admin/disconnect/:sessionId` — desconectar cualquier sesión
 
-## Operacion con bridge local
+## Producción (Vercel + Tunnel)
 
-Produccion usa Vercel + Render + Cloudflare Tunnel. Baileys corre en la PC local y Render consulta el bridge por HTTP.
+Arquitectura simplificada: Frontend en Vercel, backend en tu PC expuesto via Cloudflare Tunnel.
 
 URL fija del tunnel:
 
@@ -151,44 +164,41 @@ URL fija del tunnel:
 https://bridge.wspreminder.online
 ```
 
-Para iniciar todo lo local desde Windows:
+### Iniciar backend local
 
 ```powershell
 cd C:\Users\santi\Desktop\Escencial\WspReminder\whatsapp-reminders-backend
 npm run local:stack
 ```
 
-Para revisar estado:
+Esto inicia:
+1. Backend en `http://localhost:9090`
+2. Cloudflare Tunnel apuntando a `localhost:9090`
 
-```powershell
-npm run local:stack:status
-```
-
-Para apagar bridges, proxy y tunnel:
+### Para apagar
 
 ```powershell
 npm run local:stack:stop
 ```
 
-Render debe tener estas variables:
-
-```text
-BRIDGE_URL_ADMIN=https://bridge.wspreminder.online/admin
-BRIDGE_URL_ERIKA=https://bridge.wspreminder.online/erika
-BRIDGE_URL_MELINA=https://bridge.wspreminder.online/melina
-BRIDGE_URL_ACADEMICO_1=https://bridge.wspreminder.online/academico-1
-BRIDGE_URL_IN=https://bridge.wspreminder.online/in
-BRIDGE_URL_LUCIANA=https://bridge.wspreminder.online/luciana
-BRIDGE_URL_YANINA=https://bridge.wspreminder.online/yanina
-BRIDGE_URL_JULIETA=https://bridge.wspreminder.online/julieta
-```
-
-Chequeos rapidos:
+### Chequeos rápidos
 
 ```powershell
-curl https://bridge.wspreminder.online/admin/status
-curl https://wspreminder.onrender.com/health
+# Health del backend directo
+curl.exe http://localhost:9090/health
+
+# Health via tunnel (público)
+curl.exe https://bridge.wspreminder.online/health
+
+# Login
+curl.exe -X POST https://bridge.wspreminder.online/api/login -H "Content-Type: application/json" -d "{\"username\":\"admin\",\"password\":\"Admin2024!\"}"
 ```
+
+### Variables en Vercel (frontend)
+
+| Variable | Valor |
+|----------|-------|
+| `VITE_API_BASE_URL` | `https://bridge.wspreminder.online` |
 
 ## Notas
 

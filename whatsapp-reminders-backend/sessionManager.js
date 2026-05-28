@@ -1,6 +1,6 @@
 const { join } = require('path')
 const { homedir } = require('os')
-const { existsSync, mkdirSync } = require('fs')
+const { existsSync, mkdirSync, rmSync } = require('fs')
 const { makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys')
 const { createScheduler } = require('./scheduler')
 const { createBridgeClient } = require('./bridgeClient')
@@ -16,8 +16,8 @@ const DEFAULT_BASE_DATA_DIR = process.env.WHATSAPP_REMINDERS_DATA_DIR || (() => 
 })()
 const DEFAULT_SESSION_ID = 'default'
 const HEALTH_CHECK_INTERVAL_MS = 45_000
-const MAX_RECONNECT_DELAY_MS = 60_000
-const INITIAL_RECONNECT_DELAY_MS = 1_000
+const MAX_RECONNECT_DELAY_MS = 30_000
+const INITIAL_RECONNECT_DELAY_MS = 500
 const BRIDGE_POLL_INTERVAL_MS = 5_000
 
 const sessions = new Map()
@@ -155,10 +155,7 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
       try {
         const ws = session.client?.ws
         if (ws && ws.readyState !== 1 && session.isClientReady) {
-          logger.warn({ sessionId: session.id, readyState: ws.readyState }, 'Health check: socket not open, reconnecting...')
-          session.isClientReady = false
-          session.reconnectAttempts += 1
-          startSocket()
+          logger.warn({ sessionId: session.id, readyState: ws.readyState }, 'Health check: socket not open, waiting for Baileys reconnect')
         }
       } catch (err) {
         logger.warn({ sessionId: session.id, err: err.message }, 'Health check error')
@@ -237,7 +234,13 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
 
   async function startSocket() {
     // Check bridge mode first
-    if (await startBridgeMode()) return
+    if (session._socketStarting) {
+      logger.warn({ sessionId: session.id }, 'startSocket already in progress, skipping')
+      return
+    }
+    session._socketStarting = true
+
+    if (await startBridgeMode()) { session._socketStarting = false; return }
 
     const authPath = join(sessionDataDir, 'auth')
 
@@ -250,6 +253,7 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
       logger.error({ sessionId: session.id, err: err.message }, 'Error loading auth state')
       session.sessionStatus = 'disconnected'
       session.lastSessionMessage = 'Error al cargar credenciales: ' + err.message
+      session._socketStarting = false
       return
     }
 
@@ -261,8 +265,9 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
       syncFullHistory: false,
       generateHighQualityLinkPreview: false,
       markOnlineOnConnect: false,
-      keepAliveIntervalMs: 30_000,
+      keepAliveIntervalMs: 25_000,
       retryRequestOnFail: true,
+      defaultQueryTimeoutMs: 60_000,
     })
 
     sock.ev.on('creds.update', saveCreds)
@@ -299,7 +304,6 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
 
       if (connection === 'close') {
         const statusCode = lastDisconnect?.error?.output?.statusCode
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut
 
         session.isClientReady = false
         session.lastQr = null
@@ -307,14 +311,17 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
         session.disconnectedAt = new Date().toISOString()
         stopHealthCheck()
 
-        logger.warn({ sessionId: session.id, statusCode, shouldReconnect, reason: lastDisconnect?.error?.message }, 'Connection closed')
+        logger.warn({ sessionId: session.id, statusCode, reason: lastDisconnect?.error?.message }, 'Connection closed')
 
         // Notificar webhook de desconexion
         notifyDisconnectWebhook(session.id, statusCode, lastDisconnect?.error?.message, session.reconnectAttempts)
 
         if (statusCode === DisconnectReason.loggedOut) {
-          session.sessionStatus = 'logged_out'
-          session.lastSessionMessage = 'Sesion cerrada. Escanea el QR nuevamente.'
+          logger.info({ sessionId: session.id }, 'Session logged out, clearing auth and generating new QR')
+          const authPath2 = join(sessionDataDir, 'auth')
+          try { if (existsSync(authPath2)) rmSync(authPath2, { recursive: true, force: true }) } catch (err) { logger.warn({ sessionId: session.id, err: err?.message }, 'Error clearing auth') }
+          session.sessionStatus = 'starting'
+          session.lastSessionMessage = 'Sesion expirada. Generando nuevo QR...'
           session.reconnectAttempts = 0
         } else {
           session.sessionStatus = 'disconnected'
@@ -322,7 +329,7 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
           session.reconnectAttempts += 1
         }
 
-        if (shouldReconnect && !session.manuallyDisconnected) {
+        if (!session.manuallyDisconnected) {
           const delay = getReconnectDelay()
           logger.info({ sessionId: session.id, delay: Math.round(delay), attempt: session.reconnectAttempts }, 'Reconnecting')
           setTimeout(startSocket, delay)
@@ -334,6 +341,7 @@ function createSession(sessionId = DEFAULT_SESSION_ID, { onSendScheduled } = {})
   })
 
     session.client = sock
+    session._socketStarting = false
   }
 
   function cleanupBridgeTimers() {

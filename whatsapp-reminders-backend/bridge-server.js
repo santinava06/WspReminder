@@ -9,10 +9,11 @@ const { formatUptime } = require('./shared/utils')
 const PORT = Number(process.env.BRIDGE_PORT) || 3178
 const AUTH_DIR = process.env.BRIDGE_AUTH_DIR || join(__dirname, 'bridge-auth')
 const HEALTH_CHECK_INTERVAL_MS = 45_000
-const MAX_RECONNECT_DELAY_MS = 60_000
-const INITIAL_RECONNECT_DELAY_MS = 1_000
-const KEEPALIVE_INTERVAL_MS = 30_000
+const MAX_RECONNECT_DELAY_MS = 30_000
+const INITIAL_RECONNECT_DELAY_MS = 500
+const KEEPALIVE_INTERVAL_MS = 25_000
 const GROUPS_CACHE_FILE = join(AUTH_DIR, 'groups-cache.json')
+const QR_CACHE_FILE = join(AUTH_DIR, 'last-qr.json')
 
 if (!existsSync(AUTH_DIR)) mkdirSync(AUTH_DIR, { recursive: true })
 
@@ -32,6 +33,7 @@ let reconnectAttempts = 0
 let healthInterval = null
 let cachedGroups = []
 let cachedGroupsAt = null
+let socketStarting = false
 
 function loadCachedGroups() {
   try {
@@ -48,6 +50,26 @@ function saveCachedGroups() {
   }
 }
 
+function loadCachedQr() {
+  try {
+    if (!existsSync(QR_CACHE_FILE)) return
+    const cached = JSON.parse(readFileSync(QR_CACHE_FILE, 'utf8'))
+    if (cached?.qr) { lastQr = cached.qr; lastQrDataUrl = cached.dataUrl || null; sessionStatus = 'qr'; lastSessionMessage = 'Escanea el QR para iniciar sesion' }
+  } catch { /* ignore */ }
+}
+
+function saveCachedQr() {
+  try {
+    writeFileSync(QR_CACHE_FILE, JSON.stringify({ qr: lastQr, dataUrl: lastQrDataUrl, updatedAt: new Date().toISOString() }), 'utf8')
+  } catch { /* ignore */ }
+}
+
+function clearAuth() {
+  const authPath = join(AUTH_DIR, 'auth-info')
+  try { if (existsSync(authPath)) rmSync(authPath, { recursive: true, force: true }) } catch (err) { logger.warn({ err: err.message }, 'Error clearing auth dir') }
+  try { if (existsSync(QR_CACHE_FILE)) rmSync(QR_CACHE_FILE) } catch { /* ignore */ }
+}
+
 function getReconnectDelay() {
   const delay = Math.min(INITIAL_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts), MAX_RECONNECT_DELAY_MS)
   return delay + Math.random() * 1000
@@ -58,10 +80,7 @@ function startHealthCheck() {
   healthInterval = setInterval(() => {
     try {
       if (client && client.ws && client.ws.readyState !== 1 && isClientReady) {
-        logger.warn('Health check: socket not open, reconnecting...')
-        isClientReady = false
-        reconnectAttempts += 1
-        startSocket()
+        logger.warn('Health check: socket not open (readyState=' + client.ws.readyState + '), waiting for Baileys reconnect')
       }
     } catch (err) {
       logger.warn({ err: err.message }, 'Health check error')
@@ -75,8 +94,10 @@ function stopHealthCheck() {
 
 function makeQRCode(qr) {
   try {
-    require('qrcode').toDataURL(qr, { margin: 1, width: 280 }).then(url => { lastQrDataUrl = url }).catch(() => { lastQrDataUrl = null })
+    require('qrcode').toDataURL(qr, { margin: 1, width: 280 }).then(url => { lastQrDataUrl = url; saveCachedQr() }).catch(() => { lastQrDataUrl = null })
   } catch { lastQrDataUrl = null }
+  lastQr = qr
+  saveCachedQr()
   try {
     require('qrcode-terminal').generate(qr, { small: true })
   } catch (err) {
@@ -85,6 +106,11 @@ function makeQRCode(qr) {
 }
 
 async function startSocket() {
+  if (socketStarting) {
+    logger.warn('startSocket already in progress, skipping')
+    return
+  }
+  socketStarting = true
   const authPath = join(AUTH_DIR, 'auth-info')
 
   let state, saveCreds
@@ -96,6 +122,7 @@ async function startSocket() {
     logger.error({ err: err.message }, 'Error loading auth state')
     sessionStatus = 'disconnected'
     lastSessionMessage = 'Error al cargar credenciales: ' + err.message
+    socketStarting = false
     return
   }
 
@@ -108,6 +135,8 @@ async function startSocket() {
     generateHighQualityLinkPreview: false,
     markOnlineOnConnect: false,
     keepAliveIntervalMs: KEEPALIVE_INTERVAL_MS,
+    retryRequestOnFail: true,
+    defaultQueryTimeoutMs: 60_000,
   })
 
   sock.ev.on('creds.update', saveCreds)
@@ -139,8 +168,6 @@ async function startSocket() {
 
       if (connection === 'close') {
         const statusCode = lastDisconnect?.error?.output?.statusCode
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut
-
         isClientReady = false
         lastQr = null
         lastQrDataUrl = null
@@ -148,8 +175,10 @@ async function startSocket() {
         stopHealthCheck()
 
         if (statusCode === DisconnectReason.loggedOut) {
-          sessionStatus = 'logged_out'
-          lastSessionMessage = 'Sesion cerrada. Escanea el QR nuevamente.'
+          logger.info('Session logged out, clearing auth and generating new QR')
+          clearAuth()
+          sessionStatus = 'starting'
+          lastSessionMessage = 'Sesion expirada. Generando nuevo QR...'
           reconnectAttempts = 0
         } else {
           sessionStatus = 'disconnected'
@@ -157,11 +186,9 @@ async function startSocket() {
           reconnectAttempts += 1
         }
 
-        if (shouldReconnect) {
-          const delay = getReconnectDelay()
-          logger.info({ delay: Math.round(delay), attempt: reconnectAttempts }, 'Reconnecting')
-          setTimeout(startSocket, delay)
-        }
+        const delay = getReconnectDelay()
+        logger.info({ delay: Math.round(delay), attempt: reconnectAttempts }, 'Reconnecting')
+        setTimeout(startSocket, delay)
       }
     } catch (err) {
       logger.error({ err: err.message }, 'Error en connection.update')
@@ -171,6 +198,7 @@ async function startSocket() {
   sock.ev.on('messages.upsert', () => {}) // consume events to avoid warnings
 
   client = sock
+  socketStarting = false
 }
 
 // API endpoints
@@ -223,7 +251,7 @@ app.post('/pair', async (req, res) => {
 
 app.post('/send', async (req, res) => {
   try {
-    if (!isClientReady || !client) {
+    if (!client || (!isClientReady && !client.user)) {
       return res.status(503).json({ ok: false, error: 'WhatsApp no conectado' })
     }
     const { groupId, message, media } = req.body
@@ -266,7 +294,7 @@ app.post('/send', async (req, res) => {
 
 app.post('/send-bulk', async (req, res) => {
   try {
-    if (!isClientReady || !client) {
+    if (!client || (!isClientReady && !client.user)) {
       return res.status(503).json({ ok: false, error: 'WhatsApp no conectado' })
     }
     const { groups, message, media } = req.body
@@ -305,7 +333,7 @@ app.post('/send-bulk', async (req, res) => {
 
 app.get('/groups', async (req, res) => {
   try {
-    if (!isClientReady || !client) {
+    if (!client || (!isClientReady && !client.user)) {
       return res.status(503).json({ ok: false, error: 'WhatsApp no conectado' })
     }
     let groups = []
@@ -350,6 +378,7 @@ app.post('/disconnect', async (req, res) => {
 
     const authPath = join(AUTH_DIR, 'auth-info')
     try { if (existsSync(authPath)) rmSync(authPath, { recursive: true, force: true }) } catch (err) { logger.warn({ err: err.message }, 'Error clearing auth dir') }
+    try { if (existsSync(QR_CACHE_FILE)) rmSync(QR_CACHE_FILE) } catch { /* ignore */ }
 
     res.json({ ok: true, message: 'Sesion desconectada' })
     setTimeout(startSocket, 1000)
@@ -366,6 +395,7 @@ app.use((err, req, res, next) => {
 })
 
 loadCachedGroups()
+loadCachedQr()
 startSocket()
 
 const server = app.listen(PORT, '0.0.0.0', () => {

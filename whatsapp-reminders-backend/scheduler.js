@@ -2,6 +2,9 @@ const logger = require('./logger')
 const { getDatabase } = require('./db')
 const { buildBaileysMessage } = require('./shared/baileys')
 
+const MAX_RETRY_COUNT = 3
+const RETRY_DELAY_MS = 30_000
+
 function rowToMessage(r) {
   const msg = {
     id: r.id,
@@ -40,10 +43,11 @@ class Scheduler {
       let changed = false
       for (const msg of this.messages) {
         if (msg.status === 'sending') {
-          msg.status = 'failed'
-          msg.lastError = 'El servidor se reinicio mientras se enviaba este mensaje'
+          msg.status = 'pending'
+          msg.lastError = 'El servidor se reinicio. El mensaje sera reintentado.'
           msg.updatedAt = new Date().toISOString()
           changed = true
+          logger.warn({ msgId: msg.id, sessionId: this.sessionId }, 'Mensaje en estado sending recuperado como pending')
         }
       }
       if (changed) this._syncAllToDb()
@@ -173,12 +177,25 @@ class Scheduler {
       msg.updatedAt = new Date().toISOString()
       this.update(msg)
       for (const group of msg.groups) {
-        try {
-          const baileysMsg = buildBaileysMessage({ message: msg.message, media: msg.media })
-          await client.sendMessage(group.id, baileysMsg)
-          msg.results.push({ groupId: group.id, groupName: group.name, ok: true })
-        } catch (err) {
-          msg.results.push({ groupId: group.id, groupName: group.name, ok: false, error: err.message })
+        let lastError = null
+        let success = false
+        for (let attempt = 0; attempt < MAX_RETRY_COUNT; attempt++) {
+          try {
+            const baileysMsg = buildBaileysMessage({ message: msg.message, media: msg.media })
+            await client.sendMessage(group.id, baileysMsg)
+            msg.results.push({ groupId: group.id, groupName: group.name, ok: true })
+            success = true
+            break
+          } catch (err) {
+            lastError = err
+            if (attempt < MAX_RETRY_COUNT - 1) {
+              logger.warn({ msgId: msg.id, groupId: group.id, attempt: attempt + 1, err: err.message }, 'Reintentando envio')
+              await new Promise(r => setTimeout(r, RETRY_DELAY_MS))
+            }
+          }
+        }
+        if (!success) {
+          msg.results.push({ groupId: group.id, groupName: group.name, ok: false, error: lastError.message })
         }
       }
       const failed = msg.results.filter(r => !r.ok)

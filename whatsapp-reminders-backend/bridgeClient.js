@@ -1,21 +1,35 @@
 const { fetchWithTimeout } = require('./shared/utils')
 
 const BASE_URL = process.env.BRIDGE_URL || 'http://localhost:3178'
+const MAX_RETRIES = 3
+const RETRY_DELAYS_MS = [500, 2000, 5000]
 
 function createBridgeClient(bridgeUrl = BASE_URL) {
   let bridgeStatus = null
   let pollingTimer = null
 
   async function bridgeFetch(path, options = {}) {
-    const url = `${bridgeUrl}${path}`
-    const response = await fetchWithTimeout(url, {
-      ...options,
-      headers: { 'Content-Type': 'application/json', ...options.headers },
-    })
-    if (!response) throw new Error('No response from bridge (timeout)')
-    const data = await response.json()
-    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`)
-    return data
+    let lastError
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const url = `${bridgeUrl}${path}`
+        const response = await fetchWithTimeout(url, {
+          ...options,
+          headers: { 'Content-Type': 'application/json', ...options.headers },
+        })
+        if (!response) throw new Error('No response from bridge (timeout)')
+        const data = await response.json()
+        if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`)
+        return data
+      } catch (err) {
+        lastError = err
+        if (attempt < MAX_RETRIES - 1) {
+          const delay = RETRY_DELAYS_MS[attempt] || 2000
+          await new Promise(r => setTimeout(r, delay))
+        }
+      }
+    }
+    throw lastError
   }
 
   async function pollStatus() {

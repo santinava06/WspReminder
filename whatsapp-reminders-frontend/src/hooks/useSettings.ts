@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
-const DEFAULT_API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3177'
+const DEFAULT_API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'https://bridge.wspreminder.online'
 const SETTINGS_STORAGE_KEY = 'whatsapp-reminders-settings'
 
 export type AppSettings = {

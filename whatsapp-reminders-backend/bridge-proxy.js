@@ -14,7 +14,49 @@ const BRIDGE_PORTS = {
 
 const PROXY_PORT = Number(process.env.PROXY_PORT) || 9090
 
-const server = http.createServer((req, res) => {
+function fetchBridgeStatus(session, port) {
+  return new Promise((resolve) => {
+    const req = http.get(`http://127.0.0.1:${port}/status`, (res) => {
+      let data = ''
+      res.on('data', (chunk) => { data += chunk })
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)) } catch { resolve(null) }
+      })
+    })
+    req.on('error', () => resolve(null))
+    req.setTimeout(5000, () => { req.destroy(); resolve(null) })
+  })
+}
+
+const server = http.createServer(async (req, res) => {
+  // Health endpoint: check all bridge servers
+  if (req.url === '/health') {
+    const entries = Object.entries(BRIDGE_PORTS)
+    const results = await Promise.all(entries.map(([session, port]) =>
+      fetchBridgeStatus(session, port).then(status => ({
+        session,
+        port,
+        ready: status?.ready || false,
+        status: status?.status || 'unreachable',
+        message: status?.message || 'Bridge no responde',
+        info: status?.info || null,
+        connection: status?.connection || null,
+      }))
+    ))
+    const healthy = results.filter(r => r.ready)
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({
+      ok: true,
+      proxy: { port: PROXY_PORT, uptime: Math.floor(process.uptime()) },
+      total: results.length,
+      healthy: healthy.length,
+      degraded: results.length - healthy.length,
+      bridges: results,
+      timestamp: new Date().toISOString(),
+    }))
+    return
+  }
+
   const parts = req.url.split('/')
   const sessionId = parts[1]
   const targetPath = '/' + parts.slice(2).join('/')
