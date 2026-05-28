@@ -37,7 +37,7 @@ const app = express()
 app.use(pinoHttp({ logger, autoLogging: { ignore: (req) => req.url === '/health' } }))
 
 // CORS hardening
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://wspreminder.vercel.app,http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000')
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'https://wspreminder.vercel.app,https://wspreminder.online,http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000')
   .split(',')
   .map(s => s.trim())
   .filter(Boolean)
