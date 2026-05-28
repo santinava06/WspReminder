@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, FormEvent } from 'react'
-import { Bell, Calendar, Command as CommandIcon, History, Image, KeyRound, MessageSquare, PanelLeftClose, PanelLeftOpen, RefreshCw, Send, SunMoon, Users } from 'lucide-react'
+import { Bell, Calendar, Command as CommandIcon, History, Image, KeyRound, MessageSquare, PanelLeftClose, PanelLeftOpen, QrCode, RefreshCw, Send, SunMoon, Users } from 'lucide-react'
 import CommandPalette from './components/CommandPalette'
 import GroupList from './components/GroupList'
 import type { Group } from './components/GroupList'
@@ -402,7 +402,7 @@ function App() {
   } = useScheduledMessages(apiBaseUrl, selectedSessionId, sessionConnected)
   const { requestNotifyPermission } = useNotifications(scheduledMessages)
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
-  const [mobileTab, setMobileTab] = useState<'groups' | 'compose'>('groups')
+  const [mobileTab, setMobileTab] = useState<'groups' | 'compose' | 'qr'>('groups')
 
   useEffect(() => {
     if (pendingOpenSchedule) {
@@ -1799,6 +1799,59 @@ function App() {
             </div>
           </div>
         </aside>
+
+        {/* QR/Pairing section as standalone mobile tab */}
+        <section className={`${panelClass} ${mobileTab !== 'qr' ? 'hidden ' : ''}lg:hidden grid min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-4 overflow-hidden p-0`}>
+          <div className="border-b !border-slate-200/70 px-5 py-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="section-kicker">Conexion</p>
+                <h2 className="mt-1 text-xl font-semibold text-slate-950">Vincular WhatsApp</h2>
+              </div>
+            </div>
+          </div>
+          <div className="scroll-area min-h-0 overflow-auto px-5 py-4">
+            <section className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+              <div className="grid gap-3">
+                <div className="rounded-lg border border-emerald-200 bg-white p-3">
+                  {qrDataUrl ? (
+                    <img className="mx-auto h-44 w-44 rounded-lg bg-white p-2 shadow-sm" src={qrDataUrl} alt="QR de WhatsApp para iniciar sesion" />
+                  ) : (
+                    <div className="mx-auto grid h-44 w-44 place-items-center rounded-lg bg-slate-50 text-emerald-700 shadow-sm">
+                      <QrCode size={42} />
+                    </div>
+                  )}
+                  <p className="mt-2 text-center text-xs font-medium text-slate-500">QR para dispositivos vinculados</p>
+                </div>
+                <div className="rounded-lg border border-emerald-200 bg-white p-3">
+                  <label className="grid gap-1.5 text-xs font-semibold text-slate-700" htmlFor="pairing-phone-mobile">
+                    Telefono con codigo de pais
+                    <input
+                      className="ui-field min-h-10 px-3 text-sm"
+                      id="pairing-phone-mobile"
+                      inputMode="numeric"
+                      placeholder="5493816367658"
+                      type="tel"
+                      value={pairingPhone}
+                      onChange={(event) => { setPairingPhone(event.target.value); setPairingError('') }}
+                    />
+                  </label>
+                  <button className={`${secondaryButton} mt-3 w-full`} type="button" disabled={pairingState === 'loading'} onClick={requestPairingCode}>
+                    <KeyRound size={14} />
+                    <span>{pairingState === 'loading' ? 'Generando...' : 'Generar codigo'}</span>
+                  </button>
+                  {pairingCode && (
+                    <div className="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-center">
+                      <p className="text-xs font-semibold text-emerald-700">Codigo de vinculacion</p>
+                      <p className="mt-1 select-all break-words font-mono text-2xl font-bold tracking-[0.16em] text-slate-950">{pairingCode}</p>
+                    </div>
+                  )}
+                  {pairingError && <p className="mt-2 text-sm font-medium text-rose-700">{pairingError}</p>}
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
       </div>
 
       {/* Bottom tab bar for mobile */}
@@ -1824,6 +1877,17 @@ function App() {
         >
           <MessageSquare size={18} />
           Mensaje
+        </button>
+        <button
+          className={`flex flex-1 flex-col items-center gap-0.5 rounded-lg py-2 text-[11px] font-medium transition ${
+            mobileTab === 'qr'
+              ? 'bg-slate-950 text-white'
+              : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+          }`}
+          onClick={() => setMobileTab('qr')}
+        >
+          <QrCode size={18} />
+          Vincular
         </button>
       </nav>
     </main>
