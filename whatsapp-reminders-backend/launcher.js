@@ -3,15 +3,16 @@ const net = require('net')
 const path = require('path')
 const fs = require('fs')
 
+const BASE_PORT = Number(process.env.BASE_PORT) || 3178
 const bridges = [
-  { session: 'admin', port: 9001 },
-  { session: 'erika', port: 9002 },
-  { session: 'melina', port: 9003 },
-  { session: 'academico-1', port: 9004 },
-  { session: 'in', port: 9005 },
-  { session: 'luciana', port: 9006 },
-  { session: 'yanina', port: 9007 },
-  { session: 'julieta', port: 9008 },
+  { session: 'admin', port: BASE_PORT },
+  { session: 'erika', port: BASE_PORT + 1 },
+  { session: 'melina', port: BASE_PORT + 2 },
+  { session: 'yanina', port: BASE_PORT + 3 },
+  { session: 'julieta', port: BASE_PORT + 4 },
+  { session: 'academico-1', port: BASE_PORT + 5 },
+  { session: 'in', port: BASE_PORT + 6 },
+  { session: 'luciana', port: BASE_PORT + 7 },
 ]
 
 const MAX_RESTART_ATTEMPTS = 5
