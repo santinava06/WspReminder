@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, FormEvent } from 'react'
-import { Bell, Calendar, Command as CommandIcon, History, Image, KeyRound, PanelLeftClose, PanelLeftOpen, RefreshCw, Send, SunMoon } from 'lucide-react'
+import { Bell, Calendar, Command as CommandIcon, History, Image, KeyRound, MessageSquare, PanelLeftClose, PanelLeftOpen, RefreshCw, Send, SunMoon, Users } from 'lucide-react'
 import CommandPalette from './components/CommandPalette'
 import GroupList from './components/GroupList'
 import type { Group } from './components/GroupList'
@@ -402,6 +402,7 @@ function App() {
   } = useScheduledMessages(apiBaseUrl, selectedSessionId, sessionConnected)
   const { requestNotifyPermission } = useNotifications(scheduledMessages)
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
+  const [mobileTab, setMobileTab] = useState<'groups' | 'compose'>('groups')
 
   useEffect(() => {
     if (pendingOpenSchedule) {
@@ -1409,7 +1410,7 @@ function App() {
 
         </aside>
 
-        <section className={`${panelClass} grid min-h-[24rem] md:min-h-[36rem] grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-4 overflow-hidden p-0`}>
+        <section className={`${panelClass} ${mobileTab !== 'groups' ? 'hidden ' : ''}lg:grid grid min-h-[24rem] md:min-h-[36rem] grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-4 overflow-hidden p-0`}>
           <div className="border-b !border-slate-200/70 px-5 py-4">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div>
@@ -1519,7 +1520,7 @@ function App() {
           )}
         </section>
 
-        <aside className={`${panelClass} grid min-h-[24rem] md:min-h-[36rem] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-0`}>
+        <aside className={`${panelClass} ${mobileTab !== 'compose' ? 'hidden ' : ''}lg:grid grid min-h-[24rem] md:min-h-[36rem] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-0`}>
           <div className="border-b !border-slate-200/70 px-5 py-4">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -1635,12 +1636,12 @@ function App() {
               <label className="grid gap-2 text-sm font-medium text-slate-950" htmlFor="message">
                 Mensaje
                 <textarea
-                  className="ui-field min-h-44 resize-none p-4 text-sm leading-6"
+                  className="ui-field min-h-20 md:min-h-44 resize-none p-4 text-sm leading-6"
                   id="message"
                   value={message}
                   onChange={(event) => setMessage(event.target.value)}
                   placeholder="Escribir mensaje..."
-                  rows={7}
+                  rows={3}
                 />
               </label>
 
@@ -1799,6 +1800,32 @@ function App() {
           </div>
         </aside>
       </div>
+
+      {/* Bottom tab bar for mobile */}
+      <nav className="flex shrink-0 border-t border-slate-200/70 bg-white px-2 py-1 lg:hidden">
+        <button
+          className={`flex flex-1 flex-col items-center gap-0.5 rounded-lg py-2 text-[11px] font-medium transition ${
+            mobileTab === 'groups'
+              ? 'bg-slate-950 text-white'
+              : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+          }`}
+          onClick={() => setMobileTab('groups')}
+        >
+          <Users size={18} />
+          Grupos
+        </button>
+        <button
+          className={`flex flex-1 flex-col items-center gap-0.5 rounded-lg py-2 text-[11px] font-medium transition ${
+            mobileTab === 'compose'
+              ? 'bg-slate-950 text-white'
+              : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+          }`}
+          onClick={() => setMobileTab('compose')}
+        >
+          <MessageSquare size={18} />
+          Mensaje
+        </button>
+      </nav>
     </main>
     <CommandPalette
       open={isCommandPaletteOpen}
