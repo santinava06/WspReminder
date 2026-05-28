@@ -2,8 +2,10 @@ const crypto = require('crypto')
 
 const USERS = [
   { username: 'admin', password: 'Admin2024!', sessionId: 'admin', displayName: 'Admin' },
-  { username: 'comercial1', password: 'Com1#2024', sessionId: 'comercial-1', displayName: 'Comercial 1' },
-  { username: 'comercial2', password: 'Com2#2024', sessionId: 'comercial-2', displayName: 'Comercial 2' },
+  { username: 'erika', password: '1234', sessionId: 'erika', displayName: 'Erika' },
+  { username: 'melina', password: '1234', sessionId: 'melina', displayName: 'Melina' },
+  { username: 'yanina', password: '1234', sessionId: 'yanina', displayName: 'Yanina' },
+  { username: 'julieta', password: '1234', sessionId: 'julieta', displayName: 'Julieta' },
   { username: 'academico1', password: 'Acad1#2024', sessionId: 'academico-1', displayName: 'Académico 1' },
   { username: 'in', password: 'IN#2024', sessionId: 'in', displayName: 'IN' },
   { username: 'luciana', password: 'in2024', sessionId: 'luciana', displayName: 'Luciana' },

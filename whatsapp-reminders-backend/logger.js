@@ -4,12 +4,6 @@ const isProduction = process.env.NODE_ENV === 'production' || process.env.RENDER
 
 const logger = pino({
   level: process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug'),
-  formatters: {
-    level(label) {
-      return { level: label }
-    },
-  },
-  timestamp: pino.stdTimeFunctions.isoTime,
   ...(isProduction
     ? {}
     : {

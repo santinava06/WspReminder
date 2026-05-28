@@ -6,12 +6,14 @@
 # To stop: close the windows or use stop-bridges.ps1
 
 $bridgePorts = @{
-  admin      = 3178
-  "comercial-1" = 3179
-  "comercial-2" = 3180
-  "academico-1" = 3181
-  "in"       = 3182
-  luciana    = 3183
+  admin      = 9001
+  erika      = 9002
+  melina     = 9003
+  "academico-1" = 9004
+  in         = 9005
+  luciana    = 9006
+  yanina     = 9007
+  julieta    = 9008
 }
 
 $rootDir = Get-Location

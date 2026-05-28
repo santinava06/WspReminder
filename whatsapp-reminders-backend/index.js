@@ -67,7 +67,7 @@ const loginLimiter = rateLimit({
   message: { ok: false, error: 'Demasiados intentos de login. Intenta de nuevo en 15 minutos.' },
 })
 
-const SESSION_NAMES = ['admin', 'comercial-1', 'comercial-2', 'academico-1', 'in', 'luciana']
+const SESSION_NAMES = ['admin', 'erika', 'melina', 'academico-1', 'in', 'luciana', 'yanina', 'julieta']
 
 // Environment validation
 const OPTIONAL_ENV_VARS = [

@@ -2,15 +2,17 @@ const http = require('http')
 const logger = require('./logger')
 
 const BRIDGE_PORTS = {
-  'admin': 3178,
-  'comercial-1': 3179,
-  'comercial-2': 3180,
-  'academico-1': 3181,
-  'in': 3182,
-  'luciana': 3183,
+  'admin': 9001,
+  'erika': 9002,
+  'melina': 9003,
+  'academico-1': 9004,
+  'in': 9005,
+  'luciana': 9006,
+  'yanina': 9007,
+  'julieta': 9008,
 }
 
-const PROXY_PORT = Number(process.env.PROXY_PORT) || 3190
+const PROXY_PORT = Number(process.env.PROXY_PORT) || 9090
 
 const server = http.createServer((req, res) => {
   const parts = req.url.split('/')

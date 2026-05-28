@@ -46,8 +46,10 @@ whatsapp-reminders-frontend/  # SPA React
 | Usuario | Contraseña | Sesión | Display name |
 |---------|-----------|--------|-------------|
 | admin | Admin2024! | admin | Admin |
-| comercial1 | Com1#2024 | comercial-1 | Comercial 1 |
-| comercial2 | Com2#2024 | comercial-2 | Comercial 2 |
+| erika | 1234 | erika | Erika |
+| melina | 1234 | melina | Melina |
+| yanina | 1234 | yanina | Yanina |
+| julieta | 1234 | julieta | Julieta |
 | academico1 | Acad1#2024 | academico-1 | Académico 1 |
 | in | IN#2024 | in | IN |
 | luciana | in2024 | luciana | Luciana |
@@ -138,6 +140,55 @@ npm run dev          # http://localhost:5173
 - `GET /admin/scheduled` — todos los programados
 - `GET /admin/stats` — estadísticas agregadas
 - `POST /admin/disconnect/:sessionId` — desconectar cualquier sesión
+
+## Operacion con bridge local
+
+Produccion usa Vercel + Render + Cloudflare Tunnel. Baileys corre en la PC local y Render consulta el bridge por HTTP.
+
+URL fija del tunnel:
+
+```text
+https://bridge.wspreminder.online
+```
+
+Para iniciar todo lo local desde Windows:
+
+```powershell
+cd C:\Users\santi\Desktop\Escencial\WspReminder\whatsapp-reminders-backend
+npm run local:stack
+```
+
+Para revisar estado:
+
+```powershell
+npm run local:stack:status
+```
+
+Para apagar bridges, proxy y tunnel:
+
+```powershell
+npm run local:stack:stop
+```
+
+Render debe tener estas variables:
+
+```text
+BRIDGE_URL_ADMIN=https://bridge.wspreminder.online/admin
+BRIDGE_URL_ERIKA=https://bridge.wspreminder.online/erika
+BRIDGE_URL_MELINA=https://bridge.wspreminder.online/melina
+BRIDGE_URL_ACADEMICO_1=https://bridge.wspreminder.online/academico-1
+BRIDGE_URL_IN=https://bridge.wspreminder.online/in
+BRIDGE_URL_LUCIANA=https://bridge.wspreminder.online/luciana
+BRIDGE_URL_YANINA=https://bridge.wspreminder.online/yanina
+BRIDGE_URL_JULIETA=https://bridge.wspreminder.online/julieta
+```
+
+Chequeos rapidos:
+
+```powershell
+curl https://bridge.wspreminder.online/admin/status
+curl https://wspreminder.onrender.com/health
+```
 
 ## Notas
 

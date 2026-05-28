@@ -10,12 +10,14 @@
 set -e
 
 declare -A BRIDGE_PORTS
-BRIDGE_PORTS[admin]=3178
-BRIDGE_PORTS[comercial-1]=3179
-BRIDGE_PORTS[comercial-2]=3180
-BRIDGE_PORTS[academico-1]=3181
-BRIDGE_PORTS[in]=3182
-BRIDGE_PORTS[luciana]=3183
+BRIDGE_PORTS[admin]=9001
+BRIDGE_PORTS[erika]=9002
+BRIDGE_PORTS[melina]=9003
+BRIDGE_PORTS[academico-1]=9004
+BRIDGE_PORTS[in]=9005
+BRIDGE_PORTS[luciana]=9006
+BRIDGE_PORTS[yanina]=9007
+BRIDGE_PORTS[julieta]=9008
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$ROOT_DIR/logs"

@@ -11,6 +11,9 @@
     "bridge": "node bridge-server.js",
     "bridges": "powershell -ExecutionPolicy Bypass -File start-bridges.ps1",
     "bridges:stop": "powershell -ExecutionPolicy Bypass -File stop-bridges.ps1",
+    "local:stack": "powershell -ExecutionPolicy Bypass -File start-local-stack.ps1",
+    "local:stack:stop": "powershell -ExecutionPolicy Bypass -File stop-local-stack.ps1",
+    "local:stack:status": "powershell -ExecutionPolicy Bypass -File status-local-stack.ps1",
     "bridges:sh": "bash start-bridges.sh",
     "bridges:stop:sh": "bash stop-bridges.sh"
   },
