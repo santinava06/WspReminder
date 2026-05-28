@@ -1168,10 +1168,13 @@ function App() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1 sm:gap-2">
+          <button className={`icon-btn h-8 w-8 lg:hidden`} type="button" onClick={toggleSidebar}>
+            {settings.sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
           <button className={secondaryButton} type="button" onClick={() => setIsCommandPaletteOpen(true)}>
             <CommandIcon size={16} />
-            <span>Cmd K</span>
+            <span className="hidden sm:inline">Cmd K</span>
           </button>
           <span
             className={`status-pill ${
@@ -1186,20 +1189,20 @@ function App() {
             <span className={`h-2 w-2 rounded-full ${isConnectionReady ? 'bg-emerald-500' : isConnectionProblem ? 'bg-rose-500' : 'bg-amber-500'}`} />
             {connectionStatus.label}
           </span>
-          <button className={ghostButton} type="button" onClick={refreshData}>
+          <button className={`${ghostButton} hidden sm:inline-flex`} type="button" onClick={refreshData}>
             <RefreshCw size={16} />
             <span>Actualizar</span>
           </button>
-          <button className={ghostButton} type="button" onClick={toggleTheme}>
+          <button className={`${ghostButton} hidden sm:inline-flex`} type="button" onClick={toggleTheme}>
             <SunMoon size={16} />
             <span>{resolvedTheme === 'dark' ? 'Claro' : 'Oscuro'}</span>
           </button>
           {isAdmin && (
-            <button className={secondaryButton} type="button" onClick={() => setIsAdminOpen(true)}>
+            <button className={`${secondaryButton} hidden sm:inline-flex`} type="button" onClick={() => setIsAdminOpen(true)}>
               <span>Admin</span>
             </button>
           )}
-          <button className={ghostButton} type="button" onClick={requestNotifyPermission} title="Activar notificaciones del navegador">
+          <button className={`${ghostButton} hidden sm:inline-flex`} type="button" onClick={requestNotifyPermission} title="Activar notificaciones del navegador">
             <Bell size={16} />
           </button>
           <button className={secondaryButton} type="button" onClick={() => setIsScheduledOpen(true)}>
@@ -1215,10 +1218,18 @@ function App() {
       </header>
 
       <div
-        className="grid min-h-0 flex-1 gap-3 transition-[grid-template-columns] duration-300 lg:grid-cols-[var(--sidebar-width)_minmax(0,1fr)_390px]"
+        className="grid min-h-0 flex-1 gap-3 transition-all duration-300 lg:grid-cols-[var(--sidebar-width)_minmax(0,1fr)_390px]"
         style={{ '--sidebar-width': settings.sidebarCollapsed ? '76px' : '260px' } as CSSProperties}
       >
-        <aside className="scroll-area flex min-h-0 flex-col gap-3 overflow-y-auto pr-1 pb-1">
+        {/* Mobile overlay backdrop */}
+        {!settings.sidebarCollapsed && (
+          <div className="fixed inset-0 z-30 bg-slate-950/30 backdrop-blur-sm lg:hidden" onClick={toggleSidebar} />
+        )}
+        <aside className={`scroll-area flex min-h-0 flex-col gap-3 overflow-y-auto pb-1 ${
+          settings.sidebarCollapsed
+            ? 'hidden lg:flex pr-1'
+            : 'fixed left-3 right-3 top-3 bottom-3 z-40 rounded-xl border border-slate-200/70 bg-white p-4 shadow-2xl lg:relative lg:inset-auto lg:z-auto lg:border-none lg:bg-transparent lg:p-0 lg:shadow-none lg:flex pr-1'
+        }`}>
           <section className={sidebarPanelClass}>
             <div className="flex items-start justify-between gap-3">
               {!settings.sidebarCollapsed && (
@@ -1398,7 +1409,7 @@ function App() {
 
         </aside>
 
-        <section className={`${panelClass} grid min-h-[36rem] grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-4 overflow-hidden p-0`}>
+        <section className={`${panelClass} grid min-h-[24rem] md:min-h-[36rem] grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-4 overflow-hidden p-0`}>
           <div className="border-b !border-slate-200/70 px-5 py-4">
             <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div>
@@ -1508,7 +1519,7 @@ function App() {
           )}
         </section>
 
-        <aside className={`${panelClass} grid min-h-[36rem] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-0`}>
+        <aside className={`${panelClass} grid min-h-[24rem] md:min-h-[36rem] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden p-0`}>
           <div className="border-b !border-slate-200/70 px-5 py-4">
             <div className="flex items-center justify-between gap-3">
               <div>
