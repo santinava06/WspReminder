@@ -1541,7 +1541,7 @@ function App() {
 
           <div className="scroll-area min-h-0 overflow-auto px-5 py-4">
             {showLinkingPanel && (
-              <section className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+              <section className="hidden lg:block mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
                 <h3 className="text-sm font-semibold text-slate-950">Vincular WhatsApp</h3>
                 <p className="mt-1 text-sm leading-6 text-slate-600">
                   Escanea el QR o genera un codigo para vincular desde el telefono.
