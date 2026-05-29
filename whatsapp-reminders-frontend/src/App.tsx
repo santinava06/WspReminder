@@ -1445,11 +1445,11 @@ function App() {
                 }
               />
             </form>
-            <button className={secondaryButton} type="button" disabled={!isReady || groupState === 'loading' || groupsRefreshing} onClick={refreshGroups}>
+            <button className={`${secondaryButton} hidden lg:inline-flex`} type="button" disabled={!isReady || groupState === 'loading' || groupsRefreshing} onClick={refreshGroups}>
               {groupsRefreshing ? 'Actualizando...' : groupState === 'loading' ? 'Cargando...' : 'Recargar'}
             </button>
 
-            <div className="flex gap-1 rounded-lg bg-slate-100 p-1 lg:col-span-2" role="group" aria-label="Filtro de seleccion">
+            <div className="hidden lg:flex gap-1 rounded-lg bg-slate-100 p-1 lg:col-span-2" role="group" aria-label="Filtro de seleccion">
               {([
                 ['all', `Todos ${searchedGroups.length}`],
                 ['favorites', `Favoritos ${favoriteCount}`],
@@ -1495,15 +1495,17 @@ function App() {
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm font-medium text-slate-700">{selectedCount} grupos seleccionados</p>
                 <div className="flex flex-wrap gap-2">
-                  <button className={secondaryButton} type="button" onClick={selectFilteredGroups}>
-                    Seleccionar visibles
-                  </button>
-                  <button className={secondaryButton} type="button" onClick={clearFilteredGroups}>
-                    Quitar visibles
-                  </button>
-                  <button className={ghostButton} type="button" onClick={clearSelectedGroups}>
-                    Limpiar
-                  </button>
+                  <div className="hidden lg:flex flex-wrap gap-2">
+                    <button className={secondaryButton} type="button" onClick={selectFilteredGroups}>
+                      Seleccionar visibles
+                    </button>
+                    <button className={secondaryButton} type="button" onClick={clearFilteredGroups}>
+                      Quitar visibles
+                    </button>
+                    <button className={ghostButton} type="button" onClick={clearSelectedGroups}>
+                      Limpiar
+                    </button>
+                  </div>
                   <button
                     className={primaryButton}
                     type="button"
@@ -1645,78 +1647,84 @@ function App() {
                 />
               </label>
 
-              <div className="flex items-center gap-3">
-                <label className="ui-btn ui-btn-secondary pressable cursor-pointer">
-                  <Image size={16} />
-                  <span>{selectedFile ? 'Cambiar foto' : 'Adjuntar foto'}</span>
-                  <input
-                    accept="image/*"
-                    className="sr-only"
-                    type="file"
-                    onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
-                  />
-                </label>
-                {selectedFile && (
-                  <button
-                    className="pressable text-sm font-medium text-rose-600 hover:text-rose-800"
-                    type="button"
-                    onClick={() => handleFileSelect(null)}
-                  >
-                    Quitar foto
-                  </button>
+              <div className="hidden lg:block">
+                <div className="flex items-center gap-3">
+                  <label className="ui-btn ui-btn-secondary pressable cursor-pointer">
+                    <Image size={16} />
+                    <span>{selectedFile ? 'Cambiar foto' : 'Adjuntar foto'}</span>
+                    <input
+                      accept="image/*"
+                      className="sr-only"
+                      type="file"
+                      onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
+                    />
+                  </label>
+                  {selectedFile && (
+                    <button
+                      className="pressable text-sm font-medium text-rose-600 hover:text-rose-800"
+                      type="button"
+                      onClick={() => handleFileSelect(null)}
+                    >
+                      Quitar foto
+                    </button>
+                  )}
+                </div>
+
+                {imagePreview && (
+                  <div className="surface-card bg-slate-50 mt-3 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium text-slate-500">{selectedFile?.name}</p>
+                        <p className="text-xs text-slate-400">
+                          {selectedFile ? `${(selectedFile.size / 1024).toFixed(1)} KB` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <img
+                      className="mt-2 max-h-40 w-full rounded-lg object-contain bg-white"
+                      src={imagePreview}
+                      alt={selectedFile?.name || 'Preview'}
+                    />
+                  </div>
                 )}
               </div>
 
-              {imagePreview && (
-                <div className="surface-card bg-slate-50 p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-xs font-medium text-slate-500">{selectedFile?.name}</p>
-                      <p className="text-xs text-slate-400">
-                        {selectedFile ? `${(selectedFile.size / 1024).toFixed(1)} KB` : ''}
-                      </p>
-                    </div>
+
+              <div className="hidden lg:block">
+                <label className="grid gap-2 text-sm font-medium text-slate-950" htmlFor="delay-seconds">
+                  Pausa entre grupos
+                  <div className="surface-card grid grid-cols-[minmax(0,1fr)_72px] items-center gap-3 px-3 py-2">
+                    <input
+                      className="accent-slate-950"
+                      min={0}
+                      max={60}
+                      type="range"
+                      value={delaySeconds}
+                      onChange={(event) => updateDelaySeconds(Number(event.target.value) || 0)}
+                    />
+                    <input
+                      className="ui-field h-9 min-h-9 px-2 text-center text-sm font-medium"
+                      id="delay-seconds"
+                      min={0}
+                      max={60}
+                      type="number"
+                      value={delaySeconds}
+                      onChange={(event) => updateDelaySeconds(Number(event.target.value) || 0)}
+                    />
                   </div>
-                  <img
-                    className="mt-2 max-h-40 w-full rounded-lg object-contain bg-white"
-                    src={imagePreview}
-                    alt={selectedFile?.name || 'Preview'}
-                  />
-                </div>
-              )}
+                </label>
+              </div>
 
-
-              <label className="grid gap-2 text-sm font-medium text-slate-950" htmlFor="delay-seconds">
-                Pausa entre grupos
-                <div className="surface-card grid grid-cols-[minmax(0,1fr)_72px] items-center gap-3 px-3 py-2">
-                  <input
-                    className="accent-slate-950"
-                    min={0}
-                    max={60}
-                    type="range"
-                    value={delaySeconds}
-                    onChange={(event) => updateDelaySeconds(Number(event.target.value) || 0)}
-                  />
-                  <input
-                    className="ui-field h-9 min-h-9 px-2 text-center text-sm font-medium"
-                    id="delay-seconds"
-                    min={0}
-                    max={60}
-                    type="number"
-                    value={delaySeconds}
-                    onChange={(event) => updateDelaySeconds(Number(event.target.value) || 0)}
-                  />
-                </div>
-              </label>
-
-              <div className="surface-card grid grid-cols-2 gap-2 bg-slate-50 p-3 text-sm">
-                <div>
-                  <span className="block text-xs text-slate-500">Destinos</span>
-                  <strong className="text-slate-950">{destinationCount}</strong>
-                </div>
-                <div>
-                  <span className="block text-xs text-slate-500">Estimado</span>
-                  <strong className="text-slate-950">{estimatedLabel}</strong>
+              <div className="hidden lg:block">
+                <div className="surface-card grid grid-cols-2 gap-2 bg-slate-50 p-3 text-sm">
+                  <div>
+                    <span className="block text-xs text-slate-500">Destinos</span>
+                    <strong className="text-slate-950">{destinationCount}</strong>
+                  </div>
+                  <div>
+                    <span className="block text-xs text-slate-500">Estimado</span>
+                    <strong className="text-slate-950">{estimatedLabel}</strong>
+                  </div>
                 </div>
               </div>
             </form>
