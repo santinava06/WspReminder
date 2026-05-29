@@ -1643,7 +1643,7 @@ function App() {
                 />
               </label>
 
-              <div className="hidden lg:block">
+              <div>
                 <div className="flex items-center gap-3">
                   <label className="ui-btn ui-btn-secondary pressable cursor-pointer">
                     <Image size={16} />
