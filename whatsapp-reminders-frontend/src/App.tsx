@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, FormEvent } from 'react'
-import { Bell, Calendar, Command as CommandIcon, History, Image, KeyRound, MessageSquare, PanelLeftClose, PanelLeftOpen, QrCode, RefreshCw, Send, SunMoon, Users } from 'lucide-react'
+import { Bell, Calendar, Command as CommandIcon, History, Image, KeyRound, MessageSquare, PanelLeftClose, PanelLeftOpen, QrCode, RefreshCw, Send, SunMoon, User, Users } from 'lucide-react'
 import CommandPalette from './components/CommandPalette'
 import GroupList from './components/GroupList'
 import type { Group } from './components/GroupList'
@@ -402,7 +402,7 @@ function App() {
   } = useScheduledMessages(apiBaseUrl, selectedSessionId, sessionConnected)
   const { requestNotifyPermission } = useNotifications(scheduledMessages)
   const [isScheduleOpen, setIsScheduleOpen] = useState(false)
-  const [mobileTab, setMobileTab] = useState<'groups' | 'compose' | 'qr'>('groups')
+  const [mobileTab, setMobileTab] = useState<'groups' | 'compose' | 'qr' | 'sidebar'>('groups')
 
   useEffect(() => {
     if (pendingOpenSchedule) {
@@ -1170,8 +1170,8 @@ function App() {
         </div>
 
         <div className="flex flex-wrap items-center gap-1 sm:gap-2">
-          <button className={`icon-btn h-8 w-8 lg:hidden`} type="button" onClick={toggleSidebar}>
-            {settings.sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          <button className={`icon-btn h-8 w-8 lg:hidden`} type="button" onClick={() => setMobileTab('sidebar')}>
+            <PanelLeftOpen size={16} />
           </button>
           <button className={secondaryButton} type="button" onClick={() => setIsCommandPaletteOpen(true)}>
             <CommandIcon size={16} />
@@ -1222,18 +1222,14 @@ function App() {
         className="grid min-h-0 flex-1 gap-3 transition-all duration-300 lg:grid-cols-[var(--sidebar-width)_minmax(0,1fr)_390px]"
         style={{ '--sidebar-width': settings.sidebarCollapsed ? '76px' : '260px' } as CSSProperties}
       >
-        {/* Mobile overlay backdrop */}
-        {!settings.sidebarCollapsed && (
-          <div className="fixed inset-0 z-30 bg-slate-950/30 backdrop-blur-sm lg:hidden" onClick={toggleSidebar} />
-        )}
-        <aside className={`scroll-area flex min-h-0 flex-col gap-3 overflow-y-auto pb-1 ${
+        <aside className={`scroll-area min-h-0 flex-col gap-3 overflow-y-auto pb-1 ${
           settings.sidebarCollapsed
             ? 'hidden lg:flex pr-1'
-            : 'fixed left-3 right-3 top-3 bottom-3 z-40 rounded-xl border border-slate-200/70 bg-white p-4 shadow-2xl lg:relative lg:inset-auto lg:z-auto lg:border-none lg:bg-transparent lg:p-0 lg:shadow-none lg:flex pr-1'
+            : `${mobileTab !== 'sidebar' ? 'hidden' : 'flex'} lg:relative lg:inset-auto lg:z-auto lg:border-none lg:bg-transparent lg:p-0 lg:shadow-none lg:flex pr-1`
         }`}>
           <section className={sidebarPanelClass}>
             <div className="flex items-start justify-between gap-3">
-              {!settings.sidebarCollapsed && (
+              {(!settings.sidebarCollapsed || mobileTab === 'sidebar') && (
                 <div className="min-w-0 flex-1">
                   <p className="section-kicker">Sesion</p>
                   <h2 className="mt-1 truncate text-base font-semibold text-slate-950">
@@ -1243,12 +1239,12 @@ function App() {
               )}
               <div className="flex items-center gap-2 shrink-0">
                 <span className={`mt-0.5 inline-block h-2.5 w-2.5 rounded-full ${isConnectionReady ? 'bg-emerald-500' : isConnectionProblem ? 'bg-rose-500' : 'bg-amber-500'}`} />
-                <button className="icon-btn h-8 w-8" type="button" onClick={toggleSidebar}>
+                <button className="icon-btn h-8 w-8 hidden lg:inline-flex" type="button" onClick={toggleSidebar}>
                   {settings.sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
                 </button>
               </div>
             </div>
-            {!settings.sidebarCollapsed && (
+            {(!settings.sidebarCollapsed || mobileTab === 'sidebar') && (
               <>
                 <div className="mt-3 flex items-center justify-between gap-2">
                   <div className="min-w-0 flex-1">
@@ -1314,7 +1310,7 @@ function App() {
             )}
           </section>
 
-          {!settings.sidebarCollapsed && <section className={`${sidebarPanelClass} overflow-hidden p-0`}>
+          {(!settings.sidebarCollapsed || mobileTab === 'sidebar') && <section className={`${sidebarPanelClass} overflow-hidden p-0`}>
             <div className="border-b !border-slate-200/70 px-4 py-3">
               <div className="flex items-center justify-between gap-3">
                 <h2 className="section-title">Listas</h2>
@@ -1369,12 +1365,12 @@ function App() {
 
           <section className={`${sidebarPanelClass} flex min-h-0 flex-1 flex-col p-0`}>
             <div className="flex items-center justify-between gap-3 px-4 py-3">
-              {!settings.sidebarCollapsed && <h2 className="section-title">Historial</h2>}
+              {(!settings.sidebarCollapsed || mobileTab === 'sidebar') && <h2 className="section-title">Historial</h2>}
               <button className="ui-btn ui-btn-ghost min-h-8 px-2 text-xs" type="button" onClick={() => setIsHistoryOpen(true)}>
-                {settings.sidebarCollapsed ? <History size={16} /> : `Ver todo (${sendHistory.length})`}
+                {settings.sidebarCollapsed && mobileTab !== 'sidebar' ? <History size={16} /> : `Ver todo (${sendHistory.length})`}
               </button>
             </div>
-            {!settings.sidebarCollapsed && (
+            {(!settings.sidebarCollapsed || mobileTab === 'sidebar') && (
               <div className="scroll-area min-h-0 flex-1 overflow-auto px-4 pb-4">
                 {sendHistory.length === 0 ? (
                   <p className="mt-1 rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-400">Todavia no hay envios.</p>
@@ -1896,6 +1892,17 @@ function App() {
         >
           <QrCode size={18} />
           Vincular
+        </button>
+        <button
+          className={`flex flex-1 flex-col items-center gap-0.5 rounded-lg py-2 text-[11px] font-medium transition ${
+            mobileTab === 'sidebar'
+              ? 'bg-slate-950 text-white'
+              : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
+          }`}
+          onClick={() => { setMobileTab('sidebar') }}
+        >
+          <User size={18} />
+          Cuenta
         </button>
       </nav>
     </main>
