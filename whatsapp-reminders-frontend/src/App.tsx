@@ -1148,7 +1148,7 @@ function App() {
       style={{ '--accent-rgb': accentRgbByColor[settings.accentColor] } as CSSProperties}
     >
       <Titlebar />
-    <main className="mx-auto flex min-h-0 w-full max-w-[1540px] flex-1 flex-col px-3 py-3 sm:px-5 lg:overflow-hidden lg:px-6">
+    <main className="mx-auto flex min-h-0 w-full max-w-[1540px] flex-1 flex-col overflow-hidden overscroll-none px-3 py-3 sm:px-5 lg:px-6">
       <header className="app-panel surface-panel mb-3 flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-slate-950 text-sm font-semibold text-white shadow-sm ring-1 ring-white/20">
