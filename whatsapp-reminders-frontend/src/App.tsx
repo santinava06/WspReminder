@@ -1224,7 +1224,7 @@ function App() {
       >
         <aside className={`scroll-area min-h-0 flex-col gap-3 overflow-y-auto pb-1 ${
           settings.sidebarCollapsed
-            ? 'hidden lg:flex pr-1'
+            ? `${mobileTab !== 'sidebar' ? 'hidden' : 'flex'} lg:flex pr-1`
             : `${mobileTab !== 'sidebar' ? 'hidden' : 'flex'} lg:relative lg:inset-auto lg:z-auto lg:border-none lg:bg-transparent lg:p-0 lg:shadow-none lg:flex pr-1`
         }`}>
           <section className={sidebarPanelClass}>
